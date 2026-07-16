@@ -6,18 +6,21 @@ const SIMULATED_PEERS = [
   { id: 'peer-2', name: 'Maya', color: '#f59e0b' },
 ]
 
-export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave }) {
-  const ws = useRef(null)
+export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave, onInviteCreate, onPeerInvite }) {
   const intervals = useRef([])
   const connected = useRef(false)
 
   const send = useCallback((type, payload) => {
-    // In production: ws.current?.send(JSON.stringify({ type, payload }))
-    // Here we echo back to simulate server acknowledgement
     if (type === 'widget:move' || type === 'widget:add') {
       onWidgetSync?.(payload)
     }
-  }, [onWidgetSync])
+    if (type === 'invite:create') {
+      onInviteCreate?.(payload)
+    }
+    if (type === 'peer:invite') {
+      onPeerInvite?.(payload)
+    }
+  }, [onWidgetSync, onInviteCreate, onPeerInvite])
 
   useEffect(() => {
     connected.current = true

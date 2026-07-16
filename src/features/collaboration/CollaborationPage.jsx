@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Bot, Users } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -7,15 +7,37 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 
+const AI_MODELS = [
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
+  { id: 'claude-3.5', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
+  { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google' },
+  { id: 'llama-3', name: 'Llama 3 70B', provider: 'Meta' },
+  { id: 'mistral-large', name: 'Mistral Large', provider: 'Mistral AI' },
+]
+
+const PEER_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
+
+function generateInviteCode() {
+  return 'ZAC-' + Math.random().toString(36).substring(2, 8).toUpperCase()
+}
+
+function getPeerColor(id) {
+  let hash = 0
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return PEER_COLORS[Math.abs(hash) % PEER_COLORS.length]
+}
+
 // ─── Prompt Parser ────────────────────────────────────────────────────────────
 const CHART_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
 
-function parsePrompt(prompt) {
+function parsePrompt(prompt, modelId) {
   const p = prompt.toLowerCase()
 
   if (p.includes('q3') || p.includes('quarter') || p.includes('revenue') || p.includes('sales')) {
     return {
-      type: 'bar', title: 'Q3 Revenue Summary',
+      type: 'bar', title: 'Q3 Revenue Summary', model: modelId,
       data: [
         { label: 'Jul', value: 42000 }, { label: 'Aug', value: 58000 },
         { label: 'Sep', value: 51000 },
@@ -24,7 +46,7 @@ function parsePrompt(prompt) {
   }
   if (p.includes('trend') || p.includes('growth') || p.includes('over time') || p.includes('weekly')) {
     return {
-      type: 'line', title: 'Growth Trend',
+      type: 'line', title: 'Growth Trend', model: modelId,
       data: [
         { label: 'W1', value: 120 }, { label: 'W2', value: 145 },
         { label: 'W3', value: 132 }, { label: 'W4', value: 178 },
@@ -33,7 +55,7 @@ function parsePrompt(prompt) {
   }
   if (p.includes('breakdown') || p.includes('distribution') || p.includes('share') || p.includes('usage')) {
     return {
-      type: 'pie', title: 'Usage Distribution',
+      type: 'pie', title: 'Usage Distribution', model: modelId,
       data: [
         { label: 'GPT-4o', value: 45 }, { label: 'Claude', value: 30 },
         { label: 'Gemini', value: 15 }, { label: 'Other', value: 10 },
@@ -42,7 +64,7 @@ function parsePrompt(prompt) {
   }
   if (p.includes('table') || p.includes('list') || p.includes('log') || p.includes('summar')) {
     return {
-      type: 'table', title: 'Activity Summary',
+      type: 'table', title: 'Activity Summary', model: modelId,
       data: [
         { label: 'GPT-4o', value: '45.2K requests' },
         { label: 'Claude 3.5', value: '32.1K requests' },
@@ -52,7 +74,7 @@ function parsePrompt(prompt) {
   }
 
   return {
-    type: 'bar', title: prompt.slice(0, 40),
+    type: 'bar', title: prompt.slice(0, 40), model: modelId,
     data: [
       { label: 'A', value: Math.floor(Math.random() * 80 + 20) },
       { label: 'B', value: Math.floor(Math.random() * 80 + 20) },
@@ -164,27 +186,14 @@ function Widget({ widget, onMove, onRemove }) {
   )
 }
 
-// ─── Live Cursor ──────────────────────────────────────────────────────────────
-function LiveCursor({ name, color, x, y }) {
-  return (
-    <div className="pointer-events-none fixed z-40 transition-all duration-300 ease-out" style={{ left: x, top: y }}>
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M0 0L0 12L3.5 8.5L6 14L8 13L5.5 7.5L10 7.5L0 0Z" fill={color} stroke="white" strokeWidth="1" />
-      </svg>
-      <span className="ml-3 -mt-1 block text-[11px] font-semibold text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: color }}>
-        {name}
-      </span>
-    </div>
-  )
-}
-
 // ─── AI Chat Panel ────────────────────────────────────────────────────────────
-function ChatPanel({ onAddWidget }) {
+function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', text: 'Hi! Describe a chart or data view and I\'ll add it to the canvas. Try: "Show Q3 revenue" or "Usage breakdown".' }
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id)
   const bottomRef = useRef(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -197,11 +206,12 @@ function ChatPanel({ onAddWidget }) {
     setThinking(true)
 
     setTimeout(() => {
-      const schema = parsePrompt(text)
+      const schema = parsePrompt(text, selectedModel)
       onAddWidget(schema)
+      const modelName = AI_MODELS.find(m => m.id === selectedModel)?.name || selectedModel
       setMessages(m => [...m, {
         role: 'assistant',
-        text: `Added "${schema.title}" to the canvas as a ${schema.type} chart.`,
+        text: `Added "${schema.title}" to the canvas as a ${schema.type} chart using ${modelName}.`,
         schema,
       }])
       setThinking(false)
@@ -215,6 +225,24 @@ function ChatPanel({ onAddWidget }) {
           <Bot className="w-4 h-4 text-white" />
         </div>
         <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Prompt</span>
+        <div className="ml-auto relative">
+          <select
+            value={selectedModel}
+            onChange={e => setSelectedModel(e.target.value)}
+            className="appearance-none pl-2 pr-7 py-1 rounded-md border text-xs font-medium outline-none focus:ring-1 focus:ring-[var(--color-brand-500)] cursor-pointer"
+            style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
+          >
+            {AI_MODELS.map(model => (
+              <option key={model.id} value={model.id}>{model.name}</option>
+            ))}
+          </select>
+          <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-muted)' }} />
+        </div>
+        {mobileOpen && (
+          <button onClick={onMobileClose} className="min-1440:hidden p-1 -mr-2 text-slate-400 hover:text-white transition-colors cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-thin">
@@ -273,16 +301,131 @@ function ChatPanel({ onAddWidget }) {
   )
 }
 
+// ─── Invite Dialog ────────────────────────────────────────────────────────────
+function InviteDialog({ inviteCode, onClose, onJoin }) {
+  const [copied, setCopied] = useState(false)
+  const [joinCode, setJoinCode] = useState('')
+  const [joining, setJoining] = useState(false)
+
+  const inviteUrl = inviteCode ? `zac://collab/join/${inviteCode}` : ''
+
+  const copyToClipboard = () => {
+    if (inviteUrl) {
+      navigator.clipboard.writeText(inviteUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const handleJoin = () => {
+    const code = joinCode.trim()
+    if (!code) return
+    setJoining(true)
+    setTimeout(() => {
+      onJoin(code)
+      setJoinCode('')
+      setJoining(false)
+    }, 600)
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 min-750:p-6" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60" />
+      <div
+        className="relative w-full max-w-md rounded-xl border shadow-2xl overflow-hidden"
+        style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border-subtle)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+              <UserPlus className="w-4 h-4 text-white" />
+            </div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Invite Collaborators</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">
+            <X className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {inviteCode && (
+            <div>
+              <label className="block text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>Share this invite code</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2.5 rounded-lg border font-mono text-sm tracking-wider"
+                  style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}>
+                  {inviteCode}
+                </div>
+                <button
+                  onClick={copyToClipboard}
+                  className="p-2.5 rounded-lg border transition-colors cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}
+                  title="Copy invite link"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />}
+                </button>
+              </div>
+              {inviteUrl && (
+                <div className="mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-muted)' }}>
+                  <Link className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{inviteUrl}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="border-t pt-5" style={{ borderColor: 'var(--color-border-subtle)' }}>
+            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>Join a session</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={joinCode}
+                onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="Enter invite code"
+                className="flex-1 px-3 py-2.5 rounded-lg border text-sm font-mono tracking-wider outline-none focus:ring-2 focus:ring-[var(--color-brand-500)] transition-all uppercase"
+                style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
+              />
+              <button
+                onClick={handleJoin}
+                disabled={!joinCode.trim() || joining}
+                className="px-4 py-2.5 rounded-lg text-white text-sm font-medium transition-opacity disabled:opacity-40 cursor-pointer flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
+              >
+                {joining ? (
+                  <span className="inline-flex gap-1">
+                    <span className="animate-bounce" style={{ animationDelay: '0ms' }}>·</span>
+                    <span className="animate-bounce" style={{ animationDelay: '150ms' }}>·</span>
+                    <span className="animate-bounce" style={{ animationDelay: '300ms' }}>·</span>
+                  </span>
+                ) : 'Join'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 let widgetIdCounter = 1
 
 export default function CollaborationPage() {
   const [widgets, setWidgets] = useState([])
   const [peers, setPeers] = useState({})
+  const [chatOpen, setChatOpen] = useState(false)
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
+  const [currentUser] = useState(() => ({
+    id: 'user-' + Math.random().toString(36).substring(2, 8),
+    name: 'You',
+    color: getPeerColor('user-' + Math.random().toString(36).substring(2, 8)),
+  }))
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
 
-  // Use raw DOM for cursor elements — isolated from React render cycle
   const updateCursorDOM = useCallback(({ peerId, name, color, x, y }) => {
     if (!cursorsRef.current[peerId]) {
       const el = document.createElement('div')
@@ -307,6 +450,15 @@ export default function CollaborationPage() {
     delete cursorsRef.current[peerId]
   }, [])
 
+  const addPeer = useCallback((peer) => {
+    setPeers(p => ({ ...p, [peer.id]: peer }))
+  }, [])
+
+  const removePeer = useCallback((peerId) => {
+    setPeers(p => { const n = { ...p }; delete n[peerId]; return n })
+    removeCursorDOM(peerId)
+  }, [removeCursorDOM])
+
   const { send } = useWebSocket({
     onCursorMove: updateCursorDOM,
     onWidgetSync: (widget) => setWidgets(prev =>
@@ -314,21 +466,22 @@ export default function CollaborationPage() {
         ? prev.map(w => w.id === widget.id ? { ...w, ...widget } : w)
         : [...prev, widget]
     ),
-    onPeerJoin: (peer) => setPeers(p => ({ ...p, [peer.id]: peer })),
-    onPeerLeave: (peerId) => {
-      setPeers(p => { const n = { ...p }; delete n[peerId]; return n })
-      removeCursorDOM(peerId)
+    onPeerJoin: (peer) => addPeer(peer),
+    onPeerLeave: (peerId) => removePeer(peerId),
+    onInviteCreate: (payload) => {
+      if (payload.userId === currentUser.id) {
+        setInviteCode(payload.code)
+      }
     },
+    onPeerInvite: (peer) => addPeer(peer),
   })
 
-  // Broadcast own cursor
   useEffect(() => {
     const handler = (e) => send('cursor:move', { x: e.clientX, y: e.clientY })
     window.addEventListener('mousemove', handler)
     return () => window.removeEventListener('mousemove', handler)
   }, [send])
 
-  // Cleanup cursor DOM on unmount
   useEffect(() => {
     return () => Object.keys(cursorsRef.current).forEach(removeCursorDOM)
   }, [])
@@ -354,14 +507,31 @@ export default function CollaborationPage() {
     setWidgets(prev => prev.filter(w => w.id !== id))
   }, [])
 
+  const handleCreateInvite = () => {
+    const code = generateInviteCode()
+    setInviteCode(code)
+    setInviteDialogOpen(true)
+    send('invite:create', { userId: currentUser.id, code })
+  }
+
+  const handleJoinSession = (code) => {
+    const newPeer = {
+      id: 'peer-' + Math.random().toString(36).substring(2, 8),
+      name: 'Guest',
+      color: getPeerColor(code),
+    }
+    addPeer(newPeer)
+    send('peer:invite', { code, peer: newPeer })
+    setInviteDialogOpen(false)
+  }
+
   const peerList = Object.values(peers)
 
   return (
-    <div className="flex h-full gap-0 -m-4 min-750:-m-6 min-1440:-m-8 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="flex h-full -m-4 min-750:-m-6 min-1440:-m-8 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
 
       {/* Canvas */}
       <div ref={canvasRef} className="relative flex-1 overflow-hidden" style={{ backgroundColor: 'var(--color-bg-canvas)' }}>
-
         {/* Grid dots background */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
           <defs>
@@ -387,6 +557,36 @@ export default function CollaborationPage() {
           </div>
         )}
 
+        {/* Invite button - appears in peer bar area on desktop, floating on mobile */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+          <button
+            onClick={handleCreateInvite}
+            className="hidden min-750:flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium shadow-sm transition-colors cursor-pointer hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-secondary)' }}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            Invite
+          </button>
+        </div>
+
+        {/* Mobile chat toggle */}
+        <button
+          onClick={() => setChatOpen(v => !v)}
+          className="min-1440:hidden absolute bottom-4 right-4 z-20 p-3 rounded-full shadow-lg text-white cursor-pointer"
+          style={{ backgroundColor: 'var(--color-brand-500)' }}
+        >
+          {chatOpen ? <X className="w-5 h-5" /> : <Send className="w-5 h-5" />}
+        </button>
+
+        {/* Mobile invite button */}
+        <button
+          onClick={handleCreateInvite}
+          className="min-1440:hidden absolute top-4 right-4 z-20 p-3 rounded-full shadow-lg text-white cursor-pointer"
+          style={{ backgroundColor: 'var(--color-brand-500)' }}
+        >
+          <UserPlus className="w-5 h-5" />
+        </button>
+
         {/* Empty state */}
         {widgets.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -404,10 +604,32 @@ export default function CollaborationPage() {
         ))}
       </div>
 
-      {/* Chat Panel */}
-      <div className="w-72 border-l flex-shrink-0" style={{ borderColor: 'var(--color-border-subtle)' }}>
-        <ChatPanel onAddWidget={addWidget} />
+      {/* Chat Panel - Desktop: side-by-side, Mobile: overlay */}
+      <div className={`
+        min-1440:relative min-1440:translate-x-0 min-1440:z-auto
+        fixed inset-y-0 right-0 z-50 w-72 border-l flex-shrink-0
+        transform transition-transform duration-300 ease-in-out
+        ${chatOpen ? 'translate-x-0' : 'translate-x-full'}
+      `} style={{ borderColor: 'var(--color-border-subtle)' }}>
+        <ChatPanel onAddWidget={addWidget} mobileOpen={chatOpen} onMobileClose={() => setChatOpen(false)} />
       </div>
+
+      {/* Backdrop for mobile chat */}
+      {chatOpen && (
+        <div
+          className="min-1440:hidden fixed inset-0 bg-black/20 z-40"
+          onClick={() => setChatOpen(false)}
+        />
+      )}
+
+      {/* Invite Dialog */}
+      {inviteDialogOpen && (
+        <InviteDialog
+          inviteCode={inviteCode}
+          onClose={() => { setInviteDialogOpen(false); setInviteCode('') }}
+          onJoin={handleJoinSession}
+        />
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, User } from 'lucide-react'
+import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut } from 'lucide-react'
 import { searchIndex } from '../data/searchIndex'
 
 const TYPE_COLORS = {

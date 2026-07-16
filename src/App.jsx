@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Bot } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
