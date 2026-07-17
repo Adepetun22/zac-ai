@@ -24,6 +24,7 @@ export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLea
 
   useEffect(() => {
     connected.current = true
+    const peerIntervals = []
 
     // Simulate peers joining
     const joinTimers = SIMULATED_PEERS.map((peer, i) =>
@@ -43,6 +44,7 @@ export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLea
           })
         }, 1200 + i * 400)
 
+        peerIntervals.push(interval)
         intervals.current.push(interval)
       }, 800 + i * 600)
     )
@@ -50,10 +52,10 @@ export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLea
     return () => {
       connected.current = false
       joinTimers.forEach(clearTimeout)
-      intervals.current.forEach(clearInterval)
+      peerIntervals.forEach(clearInterval)
       SIMULATED_PEERS.forEach(peer => onPeerLeave?.(peer.id))
     }
-  }, [])
+  }, [onCursorMove, onPeerJoin, onPeerLeave])
 
   return { send }
 }

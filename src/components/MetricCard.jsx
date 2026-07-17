@@ -9,7 +9,7 @@ export default function MetricCard({ title, value, change, icon: Icon, color = '
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
+    <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-4">
         <div className={`p-2 rounded-lg ${colorClasses[color]}`}>
           <Icon className="w-5 h-5" />
@@ -21,7 +21,7 @@ export default function MetricCard({ title, value, change, icon: Icon, color = '
           {change}
         </div>
       </div>
-      <h3 className="text-2xl font-bold text-slate-900 mb-1">{value}</h3>
+      <h3 className="text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">{value}</h3>
       <p className="text-sm text-slate-500">{title}</p>
     </div>
   )

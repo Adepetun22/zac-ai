@@ -483,8 +483,9 @@ export default function CollaborationPage() {
   }, [send])
 
   useEffect(() => {
-    return () => Object.keys(cursorsRef.current).forEach(removeCursorDOM)
-  }, [])
+    const cursors = cursorsRef.current
+    return () => Object.keys(cursors).forEach(removeCursorDOM)
+  }, [removeCursorDOM])
 
   const addWidget = useCallback((schema) => {
     const id = `widget-${widgetIdCounter++}`

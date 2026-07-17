@@ -16,13 +16,13 @@ const statusConfig = {
 
 export default function RecentActivity() {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
+    <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Recent Activity</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Recent Activity</h3>
           <p className="text-sm text-slate-500">Latest AI model interactions</p>
         </div>
-        <button className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">View all</button>
+        <button className="text-sm text-indigo-600 hover:text-indigo-700 dark:text-[var(--color-brand-500)] dark:hover:text-[var(--color-brand-700)] font-medium">View all</button>
       </div>
 
       <div className="space-y-4">
@@ -30,19 +30,19 @@ export default function RecentActivity() {
           const status = statusConfig[activity.status]
           const StatusIcon = status.icon
           return (
-            <div key={activity.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+            <div key={activity.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg hover:bg-slate-100 dark:hover:bg-[var(--color-border-subtle)] transition-colors">
               <div className="flex items-center gap-4">
                 <div className={`p-2 rounded-lg ${status.bg}`}>
                   <StatusIcon className={`w-4 h-4 ${status.color}`} />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-slate-900">{activity.prompt}</p>
+                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{activity.prompt}</p>
                   <p className="text-xs text-slate-500 mt-0.5">{activity.model} • {activity.tokens.toLocaleString()} tokens</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-400">{activity.time}</span>
-                <button className="p-1 hover:bg-slate-200 rounded transition-colors">
+                <button className="p-1 hover:bg-slate-200 dark:hover:bg-[var(--color-border-strong)] rounded transition-colors">
                   <MoreHorizontal className="w-4 h-4 text-slate-400" />
                 </button>
               </div>

@@ -9,9 +9,9 @@ const data = [
 
 export default function UsageChart() {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
+    <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900">Model Usage</h3>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Model Usage</h3>
         <p className="text-sm text-slate-500">Distribution by AI model</p>
       </div>
 
@@ -31,7 +31,7 @@ export default function UsageChart() {
             ))}
           </Pie>
           <Tooltip
-            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
           />
         </PieChart>
       </ResponsiveContainer>
@@ -40,8 +40,8 @@ export default function UsageChart() {
         {data.map((item) => (
           <div key={item.name} className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
-            <span className="text-sm text-slate-600">{item.name}</span>
-            <span className="text-sm font-medium text-slate-900 ml-auto">{item.value}%</span>
+            <span className="text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{item.name}</span>
+            <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] ml-auto">{item.value}%</span>
           </div>
         ))}
       </div>

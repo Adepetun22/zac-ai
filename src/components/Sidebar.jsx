@@ -51,7 +51,7 @@ export default function Sidebar({ isOpen, onClose, onNavigate, currentPage }) {
               }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                 currentPage === item.page
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-[var(--color-brand-500)] text-white'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >

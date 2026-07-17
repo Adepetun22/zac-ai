@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Bot } from 'lucide-react'
+import useThemeStore from './store/themeStore'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import DashboardPage from './features/dashboard/DashboardPage'
@@ -45,6 +46,23 @@ function App() {
   const [currentPage, setCurrentPage] = useState('login')
   const [loading, setLoading] = useState(false)
   const [visiblePage, setVisiblePage] = useState('login')
+  
+  // Initialize theme store
+  useEffect(() => {
+    useThemeStore.getState().initTheme();
+    
+    // Listen for system theme changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e) => {
+      useThemeStore.getState().handleSystemThemeChange(e);
+    };
+    
+    mediaQuery.addEventListener('change', handleChange);
+    
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, []);
 
   const navigate = useCallback((page) => {
     if (page === currentPage) return
@@ -82,7 +100,7 @@ function App() {
   return (
     <>
       <PageLoader visible={loading} />
-      <div className="flex h-screen bg-slate-50">
+      <div className="flex h-screen bg-slate-50 dark:bg-[var(--color-bg-canvas)]">
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onNavigate={navigate} currentPage={currentPage} />
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header onMenuToggle={() => setSidebarOpen(true)} onNavigate={navigate} />

@@ -12,35 +12,35 @@ const data = [
 
 export default function ActivityChart() {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
+    <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">API Activity</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">API Activity</h3>
           <p className="text-sm text-slate-500">Requests per hour today</p>
         </div>
         <div className="flex gap-2">
-          <button className="px-3 py-1 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-md">24h</button>
-          <button className="px-3 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 rounded-md">7d</button>
-          <button className="px-3 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 rounded-md">30d</button>
+          <button className="px-3 py-1 text-xs font-medium bg-indigo-50 dark:bg-[var(--color-brand-50)] text-indigo-600 dark:text-[var(--color-brand-500)] rounded-md">24h</button>
+          <button className="px-3 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] rounded-md">7d</button>
+          <button className="px-3 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] rounded-md">30d</button>
         </div>
       </div>
 
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-          <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-          <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+          <XAxis dataKey="time" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+          <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
           <Tooltip
-            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-            labelStyle={{ color: '#1e293b', fontWeight: '600' }}
+            contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            labelStyle={{ color: 'var(--color-text-primary)', fontWeight: '600' }}
           />
           <Line
             type="monotone"
             dataKey="requests"
-            stroke="#6366f1"
+            stroke="var(--color-brand-500)"
             strokeWidth={2}
-            dot={{ fill: '#6366f1', strokeWidth: 2, r: 4 }}
-            activeDot={{ r: 6, fill: '#6366f1' }}
+            dot={{ fill: 'var(--color-brand-500)', strokeWidth: 2, r: 4 }}
+            activeDot={{ r: 6, fill: 'var(--color-brand-500)' }}
           />
         </LineChart>
       </ResponsiveContainer>
