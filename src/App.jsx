@@ -1,116 +1,185 @@
-import { useState, useCallback, useEffect } from 'react'
-import { Bot } from 'lucide-react'
-import useThemeStore from './store/themeStore'
-import Sidebar from './components/Sidebar'
-import Header from './components/Header'
-import DashboardPage from './features/dashboard/DashboardPage'
-import AIModelsPage from './features/ai-models/AIModelsPage'
-import AnalyticsPage from './features/analytics/AnalyticsPage'
-import SettingsPage from './features/settings/SettingsPage'
-import LoginPage from './features/auth/LoginPage'
-import SignupPage from './features/auth/SignupPage'
-import CollaborationPage from './features/collaboration/CollaborationPage'
+import { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { LiveblocksProvider } from '@liveblocks/react';
 
-function PageLoader({ visible }) {
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center transition-opacity duration-300"
-      style={{
-        backgroundColor: 'var(--color-bg-canvas)',
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? 'all' : 'none',
-      }}
-    >
-      <div
-        className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center"
-        style={{
-          animation: visible ? 'zac-pulse 900ms ease-in-out infinite' : 'none',
-        }}
-      >
-        <Bot className="w-5 h-5 text-white" />
-      </div>
+import Header from './components/Header';
+import Sidebar from './components/Sidebar';
+import DashboardPage from './features/dashboard/DashboardPage';
+import AIModelsPage from './features/ai-models/AIModelsPage';
+import AnalyticsPage from './features/analytics/AnalyticsPage';
+import CollaborationPage from './features/collaboration/CollaborationPage';
+import SettingsPage from './features/settings/SettingsPage';
+import LoginPage from './features/auth/LoginPage';
+import SignupPage from './features/auth/SignupPage';
+import useAuthStore from './store/authStore';
+import { liveblocksClient } from './config/liveblocks';
+import { useLiveblocks } from './hooks/useLiveblocks';
 
-      <style>{`
-        @keyframes zac-pulse {
-          0%   { transform: scale(1);    opacity: 1; }
-          50%  { transform: scale(1.35); opacity: 0.7; }
-          100% { transform: scale(1);    opacity: 1; }
-        }
-      `}</style>
-    </div>
-  )
-}
+// ProtectedRoute component
+const ProtectedRoute = ({ children, isLoading, isAuthenticated }) => {
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  }
+  
+  return isAuthenticated ? children : <Navigate to="/login" />;
+};
+
+// PublicRoute component (redirects if already logged in)
+const PublicRoute = ({ children, isLoading, isAuthenticated }) => {
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  }
+  
+  return !isAuthenticated ? children : <Navigate to="/dashboard" />;
+};
 
 function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [currentPage, setCurrentPage] = useState('login')
-  const [loading, setLoading] = useState(false)
-  const [visiblePage, setVisiblePage] = useState('login')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isAuthenticated, isLoading, initAuth } = useAuthStore();
   
-  // Initialize theme store
+  // Use Liveblocks for collaboration status
+  const {
+    others,
+    isLiveblocksEnabled
+  } = useLiveblocks('app-main-room');
+
+  // Get collaboration status for UI indicators
+  const collaborationStatus = {
+    isConnected: isLiveblocksEnabled,
+    userCount: others.length + (isLiveblocksEnabled ? 1 : 0), // +1 for current user if enabled
+  };
+
   useEffect(() => {
-    useThemeStore.getState().initTheme();
-    
-    // Listen for system theme changes
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e) => {
-      useThemeStore.getState().handleSystemThemeChange(e);
-    };
-    
-    mediaQuery.addEventListener('change', handleChange);
-    
-    return () => {
-      mediaQuery.removeEventListener('change', handleChange);
-    };
+    // Initialize authentication
+    const cleanup = initAuth();
+    return cleanup;
+  }, [initAuth]);
+
+  const handleCollaborateClick = useCallback(() => {
+    // Navigate to collaboration page when clicking the collaboration button
+    window.location.hash = '#/collaboration';
   }, []);
 
-  const navigate = useCallback((page) => {
-    if (page === currentPage) return
-    setLoading(true)
-    setTimeout(() => {
-      setCurrentPage(page)
-      setVisiblePage(page)
-      setTimeout(() => setLoading(false), 150)
-    }, 500)
-  }, [currentPage])
-
-  const authPages = ['login', 'signup']
-  const isAuth = authPages.includes(currentPage)
-
-  const renderPage = () => {
-    switch (visiblePage) {
-      case 'login':     return <LoginPage onNavigate={navigate} />
-      case 'signup':    return <SignupPage onNavigate={navigate} />
-      case 'dashboard': return <DashboardPage />
-      case 'ai-models': return <AIModelsPage />
-      case 'analytics':      return <AnalyticsPage />
-      case 'collaboration':   return <CollaborationPage />
-      case 'settings':        return <SettingsPage />
-      default:          return <DashboardPage />
-    }
-  }
-
-  if (isAuth) return (
-    <>
-      <PageLoader visible={loading} />
-      {renderPage()}
-    </>
-  )
-
   return (
-    <>
-      <PageLoader visible={loading} />
-      <div className="flex h-screen bg-slate-50 dark:bg-[var(--color-bg-canvas)]">
-        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onNavigate={navigate} currentPage={currentPage} />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header onMenuToggle={() => setSidebarOpen(true)} onNavigate={navigate} />
-          <main className="flex-1 overflow-y-auto p-4 min-750:p-6 min-1440:p-8">
-            {renderPage()}
-          </main>
+    <LiveblocksProvider client={liveblocksClient}>
+      <Router>
+        <div className="flex h-screen bg-slate-50">
+          <Sidebar 
+            isSidebarOpen={!sidebarCollapsed} 
+            toggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)} 
+            liveblocksStatus={collaborationStatus}
+          />
+          
+          <div className={`flex-1 flex flex-col ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} transition-all duration-300`}>
+            <Header 
+              onMenuToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+              onNavigate={(page) => {
+                switch(page) {
+                  case 'dashboard':
+                    window.location.hash = '#/dashboard';
+                    break;
+                  case 'settings':
+                    window.location.hash = '#/settings';
+                    break;
+                  case 'login':
+                    window.location.hash = '#/login';
+                    break;
+                  default:
+                    break;
+                }
+              }}
+              liveblocksStatus={collaborationStatus}
+              onCollaborateClick={handleCollaborateClick}
+            />
+            
+            <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
+              <Routes>
+                <Route 
+                  path="/login" 
+                  element={
+                    <PublicRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <LoginPage />
+                    </PublicRoute>
+                  } 
+                />
+                <Route 
+                  path="/signup" 
+                  element={
+                    <PublicRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <SignupPage />
+                    </PublicRoute>
+                  } 
+                />
+                
+                <Route 
+                  path="/dashboard" 
+                  element={
+                    <ProtectedRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/ai-models" 
+                  element={
+                    <ProtectedRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <AIModelsPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/analytics" 
+                  element={
+                    <ProtectedRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <AnalyticsPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/collaboration" 
+                  element={
+                    <ProtectedRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <CollaborationPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/settings" 
+                  element={
+                    <ProtectedRoute 
+                      isLoading={isLoading} 
+                      isAuthenticated={isAuthenticated}
+                    >
+                      <SettingsPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route path="/" element={<Navigate to="/dashboard" />} />
+              </Routes>
+            </main>
+          </div>
         </div>
-      </div>
-    </>
-  )
+      </Router>
+    </LiveblocksProvider>
+  );
 }
 
-export default App
+export default App;

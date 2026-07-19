@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut } from 'lucide-react'
+import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, Users } from 'lucide-react'
 import { searchIndex } from '../data/searchIndex'
 
 const TYPE_COLORS = {
@@ -9,7 +9,7 @@ const TYPE_COLORS = {
   Setting: 'bg-slate-100 text-slate-600',
 }
 
-export default function Header({ onMenuToggle, onNavigate }) {
+export default function Header({ onMenuToggle, onNavigate, liveblocksStatus = null, onCollaborateClick = null }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -43,7 +43,7 @@ export default function Header({ onMenuToggle, onNavigate }) {
       <div className="flex items-center gap-4 flex-1 min-w-0">
         <button
           onClick={onMenuToggle}
-          className="min-1440:hidden p-2 -ml-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer"
+          className="min-750:hidden p-2 -ml-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer"
         >
           <Menu className="w-5 h-5" />
         </button>
@@ -89,6 +89,26 @@ export default function Header({ onMenuToggle, onNavigate }) {
       </div>
 
       <div className="flex items-center gap-4">
+        {/* Collaboration button */}
+        {onCollaborateClick && (
+          <button 
+            onClick={onCollaborateClick}
+            className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer flex items-center"
+            title="Start Collaboration"
+          >
+            <Users className="w-5 h-5" />
+            {liveblocksStatus && liveblocksStatus.userCount > 0 && (
+              <span 
+                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white ${
+                  liveblocksStatus.isConnected ? 'bg-green-500' : 'bg-yellow-500'
+                }`}
+              >
+                {liveblocksStatus.userCount}
+              </span>
+            )}
+          </button>
+        )}
+        
         <button className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer">
           <Bell className="w-5 h-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -103,7 +123,7 @@ export default function Header({ onMenuToggle, onNavigate }) {
               <span className="text-sm font-medium text-indigo-700 dark:text-[var(--color-brand-500)]">Z</span>
             </div>
             <div className="hidden min-750:block text-left">
-              <p className="text-sm font-medium text-slate-700 dark:text-[var(--color-text-primary)]">Zac Admin</p>
+              <p className="text-sm font-semibold text-slate-700 dark:text-[var(--color-text-primary)]">Zac Admin</p>
               <p className="text-xs text-slate-500">admin@zac.ai</p>
             </div>
             <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />

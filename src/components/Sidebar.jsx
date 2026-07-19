@@ -1,76 +1,77 @@
-import { LayoutDashboard, Bot, BarChart3, Settings, X, Users } from 'lucide-react'
+/* eslint-disable no-unused-vars */
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', page: 'dashboard' },
-  { icon: Bot, label: 'AI Models', page: 'ai-models' },
-  { icon: Users, label: 'Collaboration', page: 'collaboration' },
-  { icon: BarChart3, label: 'Analytics', page: 'analytics' },
-  { icon: Settings, label: 'Settings', page: 'settings' },
-]
+const Sidebar = ({ isSidebarOpen, toggleSidebar, liveblocksStatus = null }) => {
+  const location = useLocation();
 
-export default function Sidebar({ isOpen, onClose, onNavigate, currentPage }) {
+  const navItems = [
+    { path: '/', label: 'Dashboard', icon: '📊' },
+    { path: '/analytics', label: 'Analytics', icon: '📈' },
+    { path: '/ai-models', label: 'AI Models', icon: '🤖' },
+    { path: '/collaboration', label: 'Collaboration', icon: '👥' },
+    { path: '/settings', label: 'Settings', icon: '⚙️' },
+  ];
+
   return (
     <>
-      {isOpen && (
+      {/* Mobile overlay — closes the drawer when tapped */}
+      {isSidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 min-1440:hidden"
-          onClick={onClose}
+          className="fixed inset-0 bg-black/40 z-40 min-750:hidden"
+          onClick={toggleSidebar}
+          aria-hidden="true"
         />
       )}
 
       <aside
-        className={`
-          fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 flex flex-col
-          transform transition-transform duration-300 ease-in-out
-          min-1440:relative min-1440:translate-x-0 min-1440:z-auto
-          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-        `}
+        className={`bg-slate-900 text-slate-200 w-64 shrink-0 h-screen transition-transform duration-300 ease-in-out
+          fixed inset-y-0 left-0 z-50 min-750:static min-750:z-auto min-750:translate-x-0
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        aria-label="Main navigation"
       >
-        <div className="p-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">
-              <Bot className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-white">Zac AI</h1>
-          </div>
-          <button
-            onClick={onClose}
-            className="min-1440:hidden p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+        <div className="h-16 flex items-center px-5 border-b border-slate-700/60">
+          <span className="w-7 h-7 rounded-lg flex items-center justify-center mr-3 bg-[var(--color-brand-500)] text-white text-sm font-bold">Z</span>
+          <h1 className="text-lg font-bold text-white">Zac AI Dashboard</h1>
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-1">
-          {navItems.map((item) => (
-            <button
-              key={item.page}
-              onClick={() => {
-                onNavigate(item.page)
-                onClose?.()
-              }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                currentPage === item.page
-                  ? 'bg-[var(--color-brand-500)] text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          ))}
+        {/* Collaboration Status Indicator */}
+        {liveblocksStatus && (
+          <div className="px-4 py-3 border-b border-slate-700/60">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-300">Collaboration</span>
+              <div className="flex items-center">
+                <div className={`w-2 h-2 rounded-full mr-2 ${liveblocksStatus.isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                <span className="text-xs">{liveblocksStatus.userCount} online</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <nav className="mt-5">
+          <ul>
+            {navItems.map((item) => (
+              <li key={item.path}>
+                <Link
+                  to={item.path}
+                  onClick={toggleSidebar}
+                  className={`flex items-center p-3 mx-2 rounded-lg transition-colors ${
+                    location.pathname === item.path
+                      ? 'bg-[var(--color-brand-500)] text-white'
+                      : 'hover:bg-slate-800 text-slate-300'
+                  }`}
+                  aria-current={location.pathname === item.path ? 'page' : undefined}
+                >
+                  <span className="mr-3 text-lg" aria-hidden="true">{item.icon}</span>
+                  <span>{item.label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </nav>
-
-        <div className="p-4 border-t border-slate-800">
-          <div className="bg-slate-800 rounded-lg p-4">
-            <p className="text-xs text-slate-400 mb-2">API Usage</p>
-            <div className="w-full bg-slate-700 rounded-full h-2 mb-2">
-              <div className="bg-indigo-500 h-2 rounded-full" style={{ width: '72%' }}></div>
-            </div>
-            <p className="text-xs text-slate-400">72% of monthly limit</p>
-          </div>
-        </div>
       </aside>
     </>
-  )
-}
+  );
+};
+
+export default Sidebar;

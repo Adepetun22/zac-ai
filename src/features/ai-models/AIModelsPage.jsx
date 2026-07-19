@@ -1,16 +1,10 @@
-import { useState } from 'react'
-import { Search, Plus, Edit, Trash2, Play, X, Check } from 'lucide-react'
-
-const models = [
-  { id: 1, name: 'GPT-4o', provider: 'OpenAI', status: 'active', requests: '45.2K', latency: '245ms', cost: '$0.12/1K' },
-  { id: 2, name: 'Claude 3.5 Sonnet', provider: 'Anthropic', status: 'active', requests: '32.1K', latency: '312ms', cost: '$0.15/1K' },
-  { id: 3, name: 'Gemini Pro', provider: 'Google', status: 'active', requests: '28.4K', latency: '198ms', cost: '$0.10/1K' },
-  { id: 4, name: 'Llama 3 70B', provider: 'Meta', status: 'inactive', requests: '12.8K', latency: '456ms', cost: '$0.05/1K' },
-  { id: 5, name: 'Mistral Large', provider: 'Mistral AI', status: 'active', requests: '8.9K', latency: '267ms', cost: '$0.11/1K' },
-]
+import { useState, useEffect } from 'react';
+import { Search, Plus, Edit, Trash2, Play, X, Check } from 'lucide-react';
+import useDashboardStore from '../../store/dashboardStore';
+import useAuthStore from '../../store/authStore';
 
 function ModelRowActions({ model, onRun, onEdit, onDelete }) {
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (confirmDelete) {
     return (
@@ -31,7 +25,7 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
-    )
+    );
   }
 
   return (
@@ -58,12 +52,12 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
         <Trash2 className="w-4 h-4" />
       </button>
     </div>
-  )
+  );
 }
 
 function ModelRow({ model, onRun, onEdit, onDelete }) {
   return (
-    <tr className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
+    <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
       <td className="px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
@@ -81,37 +75,92 @@ function ModelRow({ model, onRun, onEdit, onDelete }) {
           {model.status}
         </span>
       </td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.requests}</td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency}</td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost}</td>
+      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.api_requests || 0}</td>
+      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</td>
+      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost != null ? `$${model.cost.toFixed(2)}/1K` : '$0.00/1K'}</td>
       <td className="px-6 py-4">
         <ModelRowActions model={model} onRun={onRun} onEdit={onEdit} onDelete={onDelete} />
       </td>
     </tr>
-  )
+  );
 }
 
 export default function AIModelsPage() {
-  const [search, setSearch] = useState('')
-  const [data, setData] = useState(models)
-  const [toast, setToast] = useState(null)
+  const [search, setSearch] = useState('');
+  const [toast, setToast] = useState(null);
+  const { 
+    aiModels, 
+    isLoading, 
+    error, 
+    addAiModel, 
+    deleteAiModel,
+    fetchAiModels,
+    clearError
+  } = useDashboardStore();
+  const { user } = useAuthStore();
 
-  const filtered = data.filter(m =>
+  // Filter models based on search
+  const filtered = aiModels.filter(m =>
     m.name.toLowerCase().includes(search.toLowerCase()) ||
     m.provider.toLowerCase().includes(search.toLowerCase())
-  )
+  );
 
   const showToast = (msg) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 2500)
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  };
+
+  const handleRun = (model) => showToast(`Running ${model.name}...`);
+  const handleEdit = (model) => showToast(`Editing ${model.name}`);
+  const handleDelete = async (id) => {
+    try {
+      await deleteAiModel(id);
+      showToast(`Model deleted`);
+    } catch (error) {
+      console.error('Error deleting model:', error);
+      showToast(`Error deleting model: ${error.message}`);
+    }
+  };
+
+  // Load AI models when user is authenticated
+  useEffect(() => {
+    if (user?.id) {
+      fetchAiModels(user.id);
+    }
+  }, [user?.id, fetchAiModels]);
+  
+  // Handle loading and error states
+  if (isLoading && aiModels.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
   }
 
-  const handleRun = (model) => showToast(`Running ${model.name}...`)
-  const handleEdit = (model) => showToast(`Editing ${model.name}`)
-  const handleDelete = (id) => {
-    const model = data.find(m => m.id === id)
-    setData(prev => prev.filter(m => m.id !== id))
-    showToast(`${model.name} deleted`)
+  if (error) {
+    return (
+      <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="ml-3">
+            <p className="text-sm text-red-700">
+              <strong>Error:</strong> {error}
+              <button 
+                onClick={clearError}
+                className="ml-4 text-sm font-medium text-red-700 underline"
+              >
+                Dismiss
+              </button>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -128,7 +177,24 @@ export default function AIModelsPage() {
           <h2 className="text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)]">AI Models</h2>
           <p className="text-slate-500 mt-1">Manage and monitor your AI model configurations.</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer">
+        <button 
+          onClick={() => {
+            // Placeholder for adding a new model
+            const newModel = {
+              name: `New Model ${Date.now()}`,
+              provider: 'OpenAI',
+              status: 'inactive',
+              latency: 0,
+              cost: 0,
+              api_requests: 0,
+              tokens_processed: 0,
+              user_id: user?.id
+            };
+            addAiModel(newModel);
+            showToast('New model added');
+          }}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer"
+        >
           <Plus className="w-4 h-4" />
           Add Model
         </button>
@@ -173,7 +239,7 @@ export default function AIModelsPage() {
               )) : (
                 <tr>
                   <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
-                    No models match "{search}"
+                    {search ? `No models match "${search}"` : 'No models available'}
                   </td>
                 </tr>
               )}
@@ -182,5 +248,5 @@ export default function AIModelsPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

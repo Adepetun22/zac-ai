@@ -1,30 +1,33 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react';
 
-// Simulated WS server — replace URL with real ws:// endpoint in production
+// Fallback simulated peers when Liveblocks is not configured
 const SIMULATED_PEERS = [
   { id: 'peer-1', name: 'Alex', color: '#10b981' },
   { id: 'peer-2', name: 'Maya', color: '#f59e0b' },
-]
+];
 
 export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave, onInviteCreate, onPeerInvite }) {
-  const intervals = useRef([])
-  const connected = useRef(false)
+  const intervals = useRef([]);
+  const connected = useRef(false);
 
   const send = useCallback((type, payload) => {
+    // Fallback to current simulated behavior
     if (type === 'widget:move' || type === 'widget:add') {
-      onWidgetSync?.(payload)
+      onWidgetSync?.(payload);
     }
     if (type === 'invite:create') {
-      onInviteCreate?.(payload)
+      onInviteCreate?.(payload);
     }
     if (type === 'peer:invite') {
-      onPeerInvite?.(payload)
+      onPeerInvite?.(payload);
     }
-  }, [onWidgetSync, onInviteCreate, onPeerInvite])
+  }, [onWidgetSync, onInviteCreate, onPeerInvite]);
 
   useEffect(() => {
-    connected.current = true
-    const peerIntervals = []
+    connected.current = true;
+    
+    // Fallback to simulated behavior when Liveblocks is not configured
+    const peerIntervals = [];
 
     // Simulate peers joining
     const joinTimers = SIMULATED_PEERS.map((peer, i) =>
@@ -55,7 +58,7 @@ export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLea
       peerIntervals.forEach(clearInterval)
       SIMULATED_PEERS.forEach(peer => onPeerLeave?.(peer.id))
     }
-  }, [onCursorMove, onPeerJoin, onPeerLeave])
+  }, [onCursorMove, onPeerJoin, onPeerLeave]);
 
-  return { send }
+  return { send };
 }

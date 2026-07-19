@@ -6,6 +6,9 @@ import {
   PieChart as RePieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
+import { supabase } from '../../config/supabase'
+import supabaseService from '../../services/supabaseService'
+import useAuthStore from '../../store/authStore'
 
 const AI_MODELS = [
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
@@ -418,6 +421,8 @@ export default function CollaborationPage() {
   const [chatOpen, setChatOpen] = useState(false)
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteCode, setInviteCode] = useState('')
+  const [sessionId, setSessionId] = useState(null)
+  const { user } = useAuthStore()
   const [currentUser] = useState(() => ({
     id: 'user-' + Math.random().toString(36).substring(2, 8),
     name: 'You',
@@ -425,6 +430,90 @@ export default function CollaborationPage() {
   }))
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
+
+  // Ensure the current user has a collaboration session (required for RLS),
+  // then load that session's widgets.
+  useEffect(() => {
+    if (!supabase || !user?.id) return;
+
+    let active = true;
+    (async () => {
+      try {
+        const sid = await supabaseService.ensureUserSession(user.id);
+        if (!active) return;
+        setSessionId(sid);
+
+        const { data, error } = await supabase
+          .from('dashboard_widgets')
+          .select('*')
+          .eq('session_id', sid)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        const loadedWidgets = (data || []).map(widget => ({
+          id: widget.id,
+          schema: widget.schema,
+          x: widget.position_x || 40,
+          y: widget.position_y || 40,
+        }));
+
+        setWidgets(loadedWidgets);
+      } catch (error) {
+        console.error('Error loading widgets:', error);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [user?.id]);
+
+  // Subscribe to real-time widget changes from Supabase
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('widgets-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dashboard_widgets',
+        },
+        (payload) => {
+          const widget = payload.new || payload.old;
+          if (!widget) return;
+
+          switch (payload.eventType) {
+            case 'INSERT':
+              setWidgets(prev => [...prev, {
+                id: widget.id,
+                schema: widget.schema,
+                x: widget.position_x || 40,
+                y: widget.position_y || 40,
+              }]);
+              break;
+            case 'UPDATE':
+              setWidgets(prev =>
+                prev.map(w => 
+                  w.id === widget.id 
+                    ? { ...w, x: widget.position_x, y: widget.position_y } 
+                    : w
+                )
+              );
+              break;
+            case 'DELETE':
+              setWidgets(prev => prev.filter(w => w.id !== widget.id));
+              break;
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const updateCursorDOM = useCallback(({ peerId, name, color, x, y }) => {
     if (!cursorsRef.current[peerId]) {
@@ -487,7 +576,7 @@ export default function CollaborationPage() {
     return () => Object.keys(cursors).forEach(removeCursorDOM)
   }, [removeCursorDOM])
 
-  const addWidget = useCallback((schema) => {
+  const addWidget = useCallback(async (schema) => {
     const id = `widget-${widgetIdCounter++}`
     const widget = {
       id,
@@ -495,17 +584,61 @@ export default function CollaborationPage() {
       x: 40 + ((widgetIdCounter * 60) % 300),
       y: 40 + ((widgetIdCounter * 40) % 200),
     }
+    
     setWidgets(prev => [...prev, widget])
+    
+    // Save to Supabase if available
+    if (supabase && sessionId) {
+      try {
+        await supabase
+          .from('dashboard_widgets')
+          .insert([{
+            id: widget.id,
+            schema: widget.schema,
+            position_x: widget.x,
+            position_y: widget.y,
+            session_id: sessionId,
+          }]);
+      } catch (error) {
+        console.error('Error saving widget:', error);
+      }
+    }
+    
     send('widget:add', widget)
   }, [send])
 
-  const moveWidget = useCallback((id, pos) => {
+  const moveWidget = useCallback(async (id, pos) => {
     setWidgets(prev => prev.map(w => w.id === id ? { ...w, ...pos } : w))
+    
+    // Update in Supabase if available
+    if (supabase) {
+      try {
+        await supabase
+          .from('dashboard_widgets')
+          .update({ position_x: pos.x, position_y: pos.y })
+          .eq('id', id);
+      } catch (error) {
+        console.error('Error updating widget position:', error);
+      }
+    }
+    
     send('widget:move', { id, ...pos })
   }, [send])
 
-  const removeWidget = useCallback((id) => {
+  const removeWidget = useCallback(async (id) => {
     setWidgets(prev => prev.filter(w => w.id !== id))
+    
+    // Remove from Supabase if available
+    if (supabase) {
+      try {
+        await supabase
+          .from('dashboard_widgets')
+          .delete()
+          .eq('id', id);
+      } catch (error) {
+        console.error('Error removing widget:', error);
+      }
+    }
   }, [])
 
   const handleCreateInvite = () => {

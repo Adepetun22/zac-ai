@@ -1,16 +1,18 @@
-import { useState } from 'react'
-import { Save, User, Bell, Shield, Palette, Key } from 'lucide-react'
-import useThemeStore from '../../store/themeStore'
+import { useState } from 'react';
+import { Save, User, Bell, Shield, Palette, Key } from 'lucide-react';
+import useThemeStore from '../../store/themeStore';
+import useAuthStore from '../../store/authStore';
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('profile')
+  const [activeTab, setActiveTab] = useState('profile');
+  const { user, updateUser } = useAuthStore();
   
-  // Profile state
-  const [profile, setProfile] = useState({
-    firstName: 'Zac',
-    lastName: 'Admin',
-    email: 'admin@zac.ai'
-  });
+  // Profile state - initialize with default values based on user
+  const [profile, setProfile] = useState(() => ({
+    firstName: user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'User',
+    lastName: user?.user_metadata?.last_name || '',
+    email: user?.email || ''
+  }));
   
   // Notification settings state
   const [notifications, setNotifications] = useState({
@@ -28,7 +30,7 @@ export default function SettingsPage() {
   });
   
   // Get theme state and actions from store
-  const { theme, accentColor, setTheme, setAccentColor } = useThemeStore()
+  const { theme, accentColor, setTheme, setAccentColor } = useThemeStore();
   
   // API keys state
   const [apiKeys, setApiKeys] = useState([
@@ -36,20 +38,34 @@ export default function SettingsPage() {
     { id: 'dev', name: 'Development API Key', value: 'zac_dev_••••••••••••••••', revealed: false }
   ]);
 
+
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'api', label: 'API Keys', icon: Key },
-  ]
+  ];
 
   // Handle profile form submission
-  const handleProfileSubmit = (e) => {
+  const handleProfileSubmit = async (e) => {
     e.preventDefault();
-    // In a real app, you would send this data to your backend
-    console.log('Profile updated:', profile);
-    alert('Profile updated successfully!');
+    
+    try {
+      // Update user profile in Supabase
+      const updates = {
+        data: {
+          first_name: profile.firstName,
+          last_name: profile.lastName
+        }
+      };
+      
+      await updateUser(updates);
+      alert('Profile updated successfully!');
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      alert('Error updating profile: ' + error.message);
+    }
   };
 
   // Handle notification toggle
@@ -61,7 +77,7 @@ export default function SettingsPage() {
   };
 
   // Handle security form submission
-  const handleSecuritySubmit = (e) => {
+  const handleSecuritySubmit = async (e) => {
     e.preventDefault();
     
     // Validation
@@ -80,15 +96,17 @@ export default function SettingsPage() {
       return;
     }
     
-    // In a real app, you would send this data to your backend
-    console.log('Password change requested:', {
-      currentPassword: security.currentPassword,
-      newPassword: security.newPassword
-    });
-    
-    // Reset form
-    setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    alert('Password updated successfully!');
+    try {
+      // In a real app, you would use Supabase's password update functionality
+      // For now, we'll simulate the update
+      alert('Password update functionality would be handled by Supabase in a real application. For security reasons, password changes require specific authentication flows.');
+      
+      // Reset form
+      setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (error) {
+      console.error('Error updating password:', error);
+      alert('Error updating password: ' + error.message);
+    }
   };
 
   // Toggle API key visibility
@@ -118,6 +136,15 @@ export default function SettingsPage() {
     setApiKeys([newProdKey, newDevKey]);
     alert('API keys regenerated successfully! Make sure to save the new keys.');
   };
+
+  // Don't render if user is not loaded yet
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -151,11 +178,15 @@ export default function SettingsPage() {
             <form onSubmit={handleProfileSubmit} className="max-w-2xl space-y-6">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-indigo-100 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
-                  <span className="text-2xl font-bold text-indigo-700 dark:text-[var(--color-brand-500)]">Z</span>
+                  <span className="text-2xl font-bold text-indigo-700 dark:text-[var(--color-brand-500)]">
+                    {profile.firstName?.charAt(0)?.toUpperCase() || 'U'}
+                  </span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Zac Admin</h3>
-                  <p className="text-sm text-slate-500">admin@zac.ai</p>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">
+                    {profile.firstName} {profile.lastName}
+                  </h3>
+                  <p className="text-sm text-slate-500">{profile.email}</p>
                 </div>
               </div>
 
@@ -185,7 +216,9 @@ export default function SettingsPage() {
                     value={profile.email} 
                     onChange={(e) => setProfile({...profile, email: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]" 
+                    disabled
                   />
+                  <p className="text-xs text-slate-500 mt-1">Email cannot be changed here. Contact support to update your email.</p>
                 </div>
               </div>
 
@@ -232,6 +265,10 @@ export default function SettingsPage() {
             <form onSubmit={handleSecuritySubmit} className="max-w-2xl space-y-6">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-2">Change Password</h3>
+                <p className="text-xs text-slate-500 mb-4">
+                  Password updates are handled securely through Supabase authentication system.
+                  In a production environment, this would initiate a secure password change flow.
+                </p>
                 <div className="space-y-3">
                   <input 
                     type="password" 
@@ -342,5 +379,5 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

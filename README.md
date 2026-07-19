@@ -19,9 +19,25 @@ Zac-AI Dashboard is a modern React application designed for AI-powered dashboard
 - **Styling**: Tailwind CSS 4.3.2 with custom design tokens
 - **Icons**: Lucide React
 - **Charts**: Recharts
-- **State Management**: Built-in React hooks (useState, useEffect, etc.)
+- **State Management**: Built-in React hooks (useState, useEffect, etc.) and Zustand
 - **WebSockets**: Custom hook for real-time collaboration
+- **Authentication**: Supabase Auth
+- **Real-time Collaboration**: Liveblocks
+- **Routing**: React Router DOM
 - **Development**: ESLint for code quality
+
+## Environment Variables
+
+To use the full backend features, create a `.env.local` file in the project root with the following variables:
+
+```env
+# Supabase Configuration
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+
+# Liveblocks Configuration (optional - app works with simulated collaboration without it)
+VITE_LIVEBLOCKS_PUBLIC_KEY=pk_...
+```
 
 ## Project Structure
 
@@ -38,13 +54,18 @@ Zac-AI-DASHBOARD/
 │   │   ├── collaboration/ # Real-time collaboration features
 │   │   ├── dashboard/    # Main dashboard components
 │   │   └── settings/     # Settings page
-│   ├── hooks/            # Custom React hooks (useWebSocket)
+│   ├── hooks/            # Custom React hooks (useWebSocket, useLiveblocks)
+│   ├── store/            # Global state management (authStore, themeStore)
+│   ├── config/           # Configuration files (supabase.js, liveblocks.js)
 │   ├── styles/           # Global styles and Tailwind setup
 │   ├── App.jsx           # Main application router
 │   └── main.jsx          # Application entry point
+├── supabase/
+│   └── migrations/       # Database schema migrations
 ├── public/               # Static assets
 ├── package.json          # Dependencies and scripts
 ├── vite.config.js        # Vite build configuration
+├── BACKEND_SETUP.md      # Backend setup guide
 └── README.md
 ```
 
@@ -63,7 +84,9 @@ npm install
 pnpm install
 ```
 
-3. Start the development server:
+3. Create a `.env.local` file with your environment variables (see "Environment Variables" section above)
+
+4. Start the development server:
 ```bash
 npm run dev
 # or
@@ -105,21 +128,29 @@ Features real-time collaboration capabilities:
 - Live cursor tracking for other users
 - Drag-and-drop widget positioning
 - WebSocket-based synchronization
+- Real-time user presence indicators
+- Collaborative canvas with mouse tracking
 
 ### Authentication
 Secure login and signup pages with:
-- Social authentication options (Google, GitHub)
+- Supabase authentication
 - Email/password authentication
 - Password visibility toggle
-- Forgot password functionality
+- Form validation
 
 ## Architecture Highlights
 
 ### State Management
-The application uses React's built-in state management rather than external libraries like Redux or Zustand. Components manage their own state with useState and share data through props.
+The application uses React's built-in state management along with Zustand for global state. Components manage their own state with useState and share data through props.
 
 ### Real-time Collaboration
-The collaboration feature implements a custom WebSocket hook ([useWebSocket](file:///c:/Users/Orcave/Desktop/Zac-AI-Dashboard/src/hooks/useWebSocket.js#L4-L56)) that simulates real-time functionality during development. In production, this would connect to a real WebSocket server.
+The collaboration feature implements both a custom WebSocket hook ([useWebSocket](file:///c:/Users/Orcave/Desktop/Zac-AI-Dashboard/src/hooks/useWebSocket.js#L4-L56)) and Liveblocks integration:
+- When Liveblocks is configured with a valid API key, real-time collaboration features are fully enabled
+- When Liveblocks is not configured, the app falls back to simulated behavior
+- The [useLiveblocks](file:///c:/Users/Orcave/Desktop/Zac-AI-Dashboard/src/hooks/useLiveblocks.js#L12-L111) hook manages Liveblocks functionality
+- User cursors are displayed with unique colors and names
+- The [UserCursors](file:///c:/Users/Orcave/Desktop/Zac-AI-Dashboard/src/components/UserCursors.jsx#L1-L39) component renders other users' cursors in real-time
+- Collaboration status is shown in the header and sidebar
 
 ### Dynamic Content Generation
 The AI features parse natural language prompts to generate different types of content including:
@@ -167,6 +198,12 @@ The application features a responsive sidebar navigation with the following opti
 - Collaboration
 - Analytics
 - Settings
+
+The header includes a collaboration indicator showing the number of online users when Liveblocks is active.
+
+## Backend Integration
+
+The application is configured to work with Supabase for authentication and database functionality, and Liveblocks for real-time collaboration. See the [BACKEND_SETUP.md](file:///c:/Users/Orcave/Desktop/Zac-AI-Dashboard/BACKEND_SETUP.md) file for detailed setup instructions.
 
 ## Contributing
 
