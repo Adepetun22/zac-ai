@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import supabaseService from '../services/supabaseService';
+import AIService from '../services/aiService';
 
 const useDashboardStore = create((set) => ({
   widgets: [],
@@ -72,16 +73,30 @@ const useDashboardStore = create((set) => ({
     }
   },
 
-  // Fetch AI models
+  // Fetch AI models - Updated to use AI service
   fetchAiModels: async (userId) => {
     if (!userId) return;
     
     try {
-      const aiModels = await supabaseService.getAiModels(userId);
+      // First, try to get from Supabase
+      let aiModels = [];
+      try {
+        aiModels = await supabaseService.getAiModels(userId);
+      } catch (supabaseError) {
+        console.warn('Error fetching AI models from Supabase:', supabaseError);
+        // Fall back to the AI service's available models
+        aiModels = AIService.getAvailableModels();
+      }
+      
       set({ aiModels });
     } catch (error) {
-      console.error('Error fetching AI models:', error);
-      set({ aiModelsError: error.message });
+      console.error('Error in fetchAiModels:', error);
+      // Use available models from AI service as fallback
+      const fallbackModels = AIService.getAvailableModels();
+      set({ 
+        aiModels: fallbackModels,
+        aiModelsError: error.message 
+      });
     }
   },
 
@@ -130,6 +145,25 @@ const useDashboardStore = create((set) => ({
       console.error('Error deleting AI model:', error);
       set({ error: error.message, isLoading: false });
     }
+  },
+
+  // Generate response from AI model
+  generateAIResponse: async (prompt, modelId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await AIService.generateResponse(prompt, modelId);
+      set({ isLoading: false });
+      return response;
+    } catch (error) {
+      console.error('Error generating AI response:', error);
+      set({ error: error.message, isLoading: false });
+      throw error;
+    }
+  },
+
+  // Get available AI models from service
+  getAvailableAIModels: () => {
+    return AIService.getAvailableModels();
   },
 
   // Fetch analytics data

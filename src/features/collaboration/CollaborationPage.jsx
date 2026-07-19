@@ -9,6 +9,7 @@ import {
 import { supabase } from '../../config/supabase'
 import supabaseService from '../../services/supabaseService'
 import useAuthStore from '../../store/authStore'
+import AIService from '../../services/aiService' // Import the AI service
 
 const AI_MODELS = [
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
@@ -86,6 +87,34 @@ function parsePrompt(prompt, modelId) {
   }
 }
 
+// ─── AI Integration ────────────────────────────────────────────────────────────
+async function processAIRequest(prompt, modelId) {
+  try {
+    // Use the AI service to get a real response
+    const aiResponse = await AIService.generateResponse(prompt, modelId);
+    
+    // Check if the response suggests creating a chart
+    const parsedResult = parsePrompt(prompt, modelId);
+    
+    // If the prompt suggests a chart, return the chart data
+    if (parsedResult.type !== 'bar' || parsedResult.title !== prompt.slice(0, 40)) {
+      return parsedResult;
+    }
+    
+    // Otherwise, return the actual AI response as text content
+    return {
+      type: 'text', 
+      title: `AI Response: ${prompt.slice(0, 40)}`, 
+      model: modelId,
+      content: aiResponse
+    };
+  } catch (error) {
+    console.error('AI processing error:', error);
+    // Fallback to the original parsing logic
+    return parsePrompt(prompt, modelId);
+  }
+}
+
 // ─── Widget Renderers ─────────────────────────────────────────────────────────
 function WidgetChart({ schema }) {
   if (schema.type === 'bar') return (
@@ -131,6 +160,12 @@ function WidgetChart({ schema }) {
           <span className="font-medium text-slate-800">{row.value}</span>
         </div>
       ))}
+    </div>
+  )
+  
+  if (schema.type === 'text') return (
+    <div className="p-2 text-sm text-slate-700 max-h-32 overflow-y-auto">
+      {schema.content}
     </div>
   )
 
@@ -201,24 +236,42 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const handleSend = () => {
+  const handleSend = async () => {  // Changed to async
     const text = input.trim()
     if (!text || thinking) return
     setMessages(m => [...m, { role: 'user', text }])
     setInput('')
     setThinking(true)
 
-    setTimeout(() => {
-      const schema = parsePrompt(text, selectedModel)
+    try {
+      // Process the AI request using the new service
+      const schema = await processAIRequest(text, selectedModel)
       onAddWidget(schema)
       const modelName = AI_MODELS.find(m => m.id === selectedModel)?.name || selectedModel
+      
+      // Add the AI response to messages
+      let aiResponseText = `Added "${schema.title}" to the canvas`
+      
+      if (schema.type === 'text') {
+        aiResponseText = schema.content
+      } else {
+        aiResponseText += ` as a ${schema.type} chart using ${modelName}.`
+      }
+      
       setMessages(m => [...m, {
         role: 'assistant',
-        text: `Added "${schema.title}" to the canvas as a ${schema.type} chart using ${modelName}.`,
+        text: aiResponseText,
         schema,
       }])
+    } catch (error) {
+      console.error('Error processing AI request:', error)
+      setMessages(m => [...m, {
+        role: 'assistant',
+        text: 'Sorry, I encountered an error processing your request. Please try again.',
+      }])
+    } finally {
       setThinking(false)
-    }, 900)
+    }
   }
 
   return (

@@ -11,6 +11,7 @@ Zac-AI Dashboard is a modern React application designed for AI-powered dashboard
 - **Multiple Pages**: Dashboard, AI models management, analytics, collaboration workspace, and settings
 - **Responsive Design**: Works across mobile, tablet, and desktop devices
 - **Dark/Light Mode**: Automatic theme switching with CSS variables
+- **AI Model Integration**: Support for multiple AI providers including OpenAI, Anthropic, Google Gemini, and Meta Llama
 
 ## Tech Stack
 
@@ -24,6 +25,7 @@ Zac-AI Dashboard is a modern React application designed for AI-powered dashboard
 - **Authentication**: Supabase Auth
 - **Real-time Collaboration**: Liveblocks
 - **Routing**: React Router DOM
+- **AI Providers**: OpenAI, Anthropic, Google Gemini, Meta Llama
 - **Development**: ESLint for code quality
 
 ## Environment Variables
@@ -116,7 +118,7 @@ The main dashboard displays key metrics in cards and various charts:
 ### AI Models Page
 Manages AI model configurations with:
 - Model listing with status indicators
-- Provider information
+- Provider information (OpenAI, Anthropic, Google Gemini, Meta Llama)
 - Request counts and latency metrics
 - Cost per 1K tokens
 - Action buttons for running, editing, and deleting models
@@ -200,6 +202,30 @@ The application features a responsive sidebar navigation with the following opti
 - Settings
 
 The header includes a collaboration indicator showing the number of online users when Liveblocks is active.
+
+## AI Model Integration
+
+The application now supports integration with multiple AI models:
+
+- **OpenAI GPT-4o**: Advanced language understanding and generation
+- **Anthropic Claude 3.5**: Safe and context-aware AI assistance
+- **Google Gemini Pro**: Multimodal AI capabilities
+- **Meta Llama 3**: Open-source large language model
+
+### Setup AI Integration
+
+To enable AI features, you need to configure an API key:
+
+1. Obtain an API key from your preferred AI provider (OpenAI, Anthropic, etc.)
+2. Copy [.env.example](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env.example) to [.env](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env)
+3. Uncomment and set the appropriate `VITE_*_API_KEY` variable in your [.env](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env) file
+
+Example:
+```env
+VITE_OPENAI_API_KEY=sk-your-openai-api-key-here
+```
+
+The AI integration works seamlessly with the collaboration features, allowing multiple users to interact with AI-generated content in real-time.
 
 ## Backend Integration
 
