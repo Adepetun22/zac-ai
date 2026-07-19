@@ -6,11 +6,11 @@ const Sidebar = ({ isSidebarOpen, toggleSidebar, liveblocksStatus = null }) => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: '📊' },
-    { path: '/analytics', label: 'Analytics', icon: '📈' },
-    { path: '/ai-models', label: 'AI Models', icon: '🤖' },
-    { path: '/collaboration', label: 'Collaboration', icon: '👥' },
-    { path: '/settings', label: 'Settings', icon: '⚙️' },
+    { path: '/', label: 'Dashboard' },
+    { path: '/analytics', label: 'Analytics' },
+    { path: '/ai-models', label: 'AI Models' },
+    { path: '/collaboration', label: 'Collaboration' },
+    { path: '/settings', label: 'Settings' },
   ];
 
   return (
@@ -62,7 +62,6 @@ const Sidebar = ({ isSidebarOpen, toggleSidebar, liveblocksStatus = null }) => {
                   }`}
                   aria-current={location.pathname === item.path ? 'page' : undefined}
                 >
-                  <span className="mr-3 text-lg" aria-hidden="true">{item.icon}</span>
                   <span>{item.label}</span>
                 </Link>
               </li>
