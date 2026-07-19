@@ -211,18 +211,19 @@ The application now supports integration with multiple AI models:
 - **Anthropic Claude 3.5**: Safe and context-aware AI assistance
 - **Google Gemini Pro**: Multimodal AI capabilities
 - **Meta Llama 3**: Open-source large language model
+- **Hugging Face Models**: Access to a wide variety of open-source models
 
 ### Setup AI Integration
 
 To enable AI features, you need to configure an API key:
 
-1. Obtain an API key from your preferred AI provider (OpenAI, Anthropic, etc.)
+1. Obtain an API key from your preferred AI provider (OpenAI, Anthropic, Hugging Face, etc.)
 2. Copy [.env.example](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env.example) to [.env](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env)
 3. Uncomment and set the appropriate `VITE_*_API_KEY` variable in your [.env](file:///c%3A/Users/Orcave/Desktop/Zac-AI-Dashboard/.env) file
 
-Example:
+For Hugging Face integration (as configured in this project):
 ```env
-VITE_OPENAI_API_KEY=sk-your-openai-api-key-here
+VITE_HUGGING_FACE_API_KEY=<YOUR_HUGGING_FACE_API_KEY>
 ```
 
 The AI integration works seamlessly with the collaboration features, allowing multiple users to interact with AI-generated content in real-time.
