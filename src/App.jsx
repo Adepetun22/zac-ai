@@ -15,6 +15,7 @@ import useAuthStore from './store/authStore';
 import { liveblocksClient, publicApiKey } from './config/liveblocks';
 import { resolveUsers, resolveRooms } from './liveblocks.config';
 import { useLiveblocks } from './hooks/useLiveblocks';
+import { NotificationProvider } from './components/Notification';
 
 // ProtectedRoute component
 const ProtectedRoute = ({ children, isLoading, isAuthenticated }) => {
@@ -201,6 +202,20 @@ function App() {
   if (liveblocksClient && publicApiKey) {
     return (
       <LiveblocksProvider publicApiKey={publicApiKey} resolveUsers={resolveUsers} resolveRooms={resolveRooms}>
+        <NotificationProvider>
+          <AppContent
+            collaborationStatus={collaborationStatus}
+            sidebarCollapsed={sidebarCollapsed}
+            setSidebarCollapsed={setSidebarCollapsed}
+            isLoading={isLoading}
+            isAuthenticated={isAuthenticated}
+          />
+        </NotificationProvider>
+      </LiveblocksProvider>
+    );
+  } else {
+    return (
+      <NotificationProvider>
         <AppContent
           collaborationStatus={collaborationStatus}
           sidebarCollapsed={sidebarCollapsed}
@@ -208,17 +223,7 @@ function App() {
           isLoading={isLoading}
           isAuthenticated={isAuthenticated}
         />
-      </LiveblocksProvider>
-    );
-  } else {
-    return (
-      <AppContent
-        collaborationStatus={collaborationStatus}
-        sidebarCollapsed={sidebarCollapsed}
-        setSidebarCollapsed={setSidebarCollapsed}
-        isLoading={isLoading}
-        isAuthenticated={isAuthenticated}
-      />
+      </NotificationProvider>
     );
   }
 }

@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Save, User, Bell, Shield, Palette, Key } from 'lucide-react';
 import useThemeStore from '../../store/themeStore';
 import useAuthStore from '../../store/authStore';
+import { useNotification } from '../../components/useNotification';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('profile');
   const { user, updateUser } = useAuthStore();
+  const { addNotification } = useNotification();
   
   // Profile state - initialize with default values based on user
   const [profile, setProfile] = useState(() => ({
@@ -61,10 +63,10 @@ export default function SettingsPage() {
       };
       
       await updateUser(updates);
-      alert('Profile updated successfully!');
+      addNotification('Profile updated successfully!', 'success');
     } catch (error) {
       console.error('Error updating profile:', error);
-      alert('Error updating profile: ' + error.message);
+      addNotification('Error updating profile: ' + error.message, 'error');
     }
   };
 
@@ -82,30 +84,27 @@ export default function SettingsPage() {
     
     // Validation
     if (!security.currentPassword) {
-      alert('Please enter your current password');
+      addNotification('Please enter your current password', 'warning');
       return;
     }
     
     if (security.newPassword.length < 8) {
-      alert('New password must be at least 8 characters');
+      addNotification('New password must be at least 8 characters', 'warning');
       return;
     }
     
     if (security.newPassword !== security.confirmPassword) {
-      alert('New passwords do not match');
+      addNotification('New passwords do not match', 'error');
       return;
     }
     
     try {
-      // In a real app, you would use Supabase's password update functionality
-      // For now, we'll simulate the update
-      alert('Password update functionality would be handled by Supabase in a real application. For security reasons, password changes require specific authentication flows.');
+      addNotification('Password update functionality would be handled by Supabase in a real application. For security reasons, password changes require specific authentication flows.', 'info');
       
-      // Reset form
       setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (error) {
       console.error('Error updating password:', error);
-      alert('Error updating password: ' + error.message);
+      addNotification('Error updating password: ' + error.message, 'error');
     }
   };
 
@@ -134,7 +133,7 @@ export default function SettingsPage() {
     };
     
     setApiKeys([newProdKey, newDevKey]);
-    alert('API keys regenerated successfully! Make sure to save the new keys.');
+    addNotification('API keys regenerated successfully! Make sure to save the new keys.', 'success');
   };
 
   // Don't render if user is not loaded yet
