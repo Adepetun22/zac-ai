@@ -169,19 +169,13 @@ class SupabaseService {
   async ensureUserSession(userId) {
     const sessionId = `default-${userId}`;
 
-    // Try to create the session (idempotent thanks to the fixed id)
     await this.client
       .from('collaboration_sessions')
-      .upsert({ id: sessionId, created_by: userId })
-      .select('id')
-      .maybeSingle();
+      .upsert({ id: sessionId, created_by: userId });
 
-    // Ensure the user is a participant
     await this.client
       .from('session_participants')
-      .upsert({ session_id: sessionId, user_id: userId })
-      .select('session_id')
-      .maybeSingle();
+      .upsert({ session_id: sessionId, user_id: userId }, { onConflict: ['session_id', 'user_id'] });
 
     return sessionId;
   }
