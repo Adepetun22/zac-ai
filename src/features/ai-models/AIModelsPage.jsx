@@ -32,21 +32,21 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
     <div className="flex items-center justify-end gap-2">
       <button
         onClick={() => onRun(model)}
-        className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-[var(--color-brand-500)] hover:bg-indigo-50 dark:hover:bg-[var(--color-brand-50)] rounded transition-colors cursor-pointer"
+        className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-[var(--color-brand-500)] hover:bg-indigo-50 dark:hover:bg-[var(--color-brand-50)] rounded transition-colors cursor-pointer"
         title="Run model"
       >
         <Play className="w-4 h-4" />
       </button>
       <button
         onClick={() => onEdit(model)}
-        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
         title="Edit model"
       >
         <Edit className="w-4 h-4" />
       </button>
       <button
         onClick={() => setConfirmDelete(true)}
-        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
         title="Delete model"
       >
         <Trash2 className="w-4 h-4" />
@@ -55,33 +55,90 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
   );
 }
 
-function ModelRow({ model, onRun, onEdit, onDelete }) {
+function ModelCard({ model, onRun, onEdit, onDelete }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   return (
-    <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
+    <div className="p-4 bg-white dark:bg-[var(--color-bg-surface)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center shrink-0">
             <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
           </div>
-          <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.name}</span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] truncate">{model.name}</p>
+            <p className="text-xs text-slate-500 truncate">{model.provider}</p>
+          </div>
         </div>
-      </td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.provider}</td>
-      <td className="px-6 py-4">
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
           model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-600 dark:text-[var(--color-text-secondary)]'
         }`}>
           <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
           {model.status}
         </span>
-      </td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.api_requests || 0}</td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</td>
-      <td className="px-6 py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost != null ? `$${model.cost.toFixed(2)}/1K` : '$0.00/1K'}</td>
-      <td className="px-6 py-4">
-        <ModelRowActions model={model} onRun={onRun} onEdit={onEdit} onDelete={onDelete} />
-      </td>
-    </tr>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Requests</p>
+          <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.api_requests || 0}</p>
+        </div>
+        <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Latency</p>
+          <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</p>
+        </div>
+        <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">Cost</p>
+          <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.cost != null ? `$${model.cost.toFixed(2)}` : '$0.00'}</p>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        {confirmDelete ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">Delete?</span>
+            <button
+              onClick={() => { onDelete(model.id); setConfirmDelete(false) }}
+              className="p-2 text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors cursor-pointer"
+              title="Confirm delete"
+            >
+              <Check className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-[var(--color-text-primary)] hover:bg-slate-100 dark:hover:bg-[var(--color-bg-canvas)] rounded-lg transition-colors cursor-pointer"
+              title="Cancel"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onRun(model)}
+              className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-[var(--color-brand-500)] hover:bg-indigo-50 dark:hover:bg-[var(--color-brand-50)] rounded-lg transition-colors cursor-pointer"
+              title="Run model"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onEdit(model)}
+              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+              title="Edit model"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+              title="Delete model"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -167,19 +224,18 @@ export default function AIModelsPage() {
     <div>
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 bg-slate-900 text-white text-sm rounded-lg shadow-lg animate-fade-in">
+        <div className="fixed bottom-4 md:bottom-6 right-4 md:right-6 z-50 px-4 py-2.5 bg-slate-900 text-white text-sm rounded-lg shadow-lg animate-fade-in">
           {toast}
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 md:mb-8">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)]">AI Models</h2>
-          <p className="text-slate-500 mt-1">Manage and monitor your AI model configurations.</p>
+          <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)]">AI Models</h2>
+          <p className="text-slate-500 mt-1 text-sm md:text-base">Manage and monitor your AI model configurations.</p>
         </div>
         <button 
           onClick={() => {
-            // Placeholder for adding a new model
             const newModel = {
               name: `New Model ${Date.now()}`,
               provider: 'OpenAI',
@@ -193,7 +249,7 @@ export default function AIModelsPage() {
             addAiModel(newModel);
             showToast('New model added');
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer w-full sm:w-auto"
         >
           <Plus className="w-4 h-4" />
           Add Model
@@ -201,7 +257,7 @@ export default function AIModelsPage() {
       </div>
 
       <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)]">
-        <div className="p-4 border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
+        <div className="p-3 md:p-4 border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
           <div className="relative max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -214,31 +270,67 @@ export default function AIModelsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile card view */}
+        <div className="min-750:hidden p-3 md:p-4 space-y-3">
+          {filtered.length > 0 ? filtered.map((model) => (
+            <ModelCard
+              key={model.id}
+              model={model}
+              onRun={handleRun}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+            />
+          )) : (
+            <div className="py-10 text-center text-sm text-slate-400">
+              {search ? `No models match "${search}"` : 'No models available'}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop table view */}
+        <div className="hidden min-750:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Model</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Provider</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Requests</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Latency</th>
-                <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Cost</th>
-                <th className="text-right px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Model</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Provider</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Requests</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Latency</th>
+                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Cost</th>
+                <th className="text-right px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-[var(--color-border-subtle)]">
               {filtered.length > 0 ? filtered.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  onRun={handleRun}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                />
+                <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
+                  <td className="px-4 md:px-6 py-3 md:py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
+                        <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
+                      </div>
+                      <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.provider}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-600 dark:text-[var(--color-text-secondary)]'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                      {model.status}
+                    </span>
+                  </td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.api_requests || 0}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost != null ? `$${model.cost.toFixed(2)}/1K` : '$0.00/1K'}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4">
+                     <ModelRowActions model={model} onRun={handleRun} onEdit={handleEdit} onDelete={handleDelete} />
+                  </td>
+                </tr>
               )) : (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="px-4 md:px-6 py-10 text-center text-sm text-slate-400">
                     {search ? `No models match "${search}"` : 'No models available'}
                   </td>
                 </tr>

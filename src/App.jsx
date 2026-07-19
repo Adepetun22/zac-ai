@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { LiveblocksProvider } from '@liveblocks/react';
 
 import Header from './components/Header';
@@ -52,11 +52,21 @@ const AppContent = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed
 
         <div className="flex-1 flex flex-col transition-all duration-300">
           <Header
+            user={isAuthenticated ? useAuthStore.getState().user : null}
             onMenuToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
             onNavigate={(page) => {
               switch(page) {
                 case 'dashboard':
                   window.location.hash = '#/dashboard';
+                  break;
+                case 'analytics':
+                  window.location.hash = '#/analytics';
+                  break;
+                case 'ai-models':
+                  window.location.hash = '#/ai-models';
+                  break;
+                case 'collaboration':
+                  window.location.hash = '#/collaboration';
                   break;
                 case 'settings':
                   window.location.hash = '#/settings';

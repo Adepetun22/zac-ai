@@ -9,7 +9,7 @@ const TYPE_COLORS = {
   Setting: 'bg-slate-100 text-slate-600',
 }
 
-export default function Header({ onMenuToggle, onNavigate, liveblocksStatus = null, onCollaborateClick = null }) {
+export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatus = null, onCollaborateClick = null }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -19,7 +19,8 @@ export default function Header({ onMenuToggle, onNavigate, liveblocksStatus = nu
   const results = query.trim().length > 0
     ? searchIndex.filter(item =>
         item.label.toLowerCase().includes(query.toLowerCase()) ||
-        item.description.toLowerCase().includes(query.toLowerCase())
+        item.description.toLowerCase().includes(query.toLowerCase()) ||
+        item.page.toLowerCase().includes(query.toLowerCase())
       ).slice(0, 8)
     : []
 
@@ -123,8 +124,8 @@ export default function Header({ onMenuToggle, onNavigate, liveblocksStatus = nu
               <span className="text-sm font-medium text-indigo-700 dark:text-[var(--color-brand-500)]">Z</span>
             </div>
             <div className="hidden min-750:block text-left">
-              <p className="text-sm font-semibold text-slate-700 dark:text-[var(--color-text-primary)]">Zac Admin</p>
-              <p className="text-xs text-slate-500">admin@zac.ai</p>
+              <p className="text-sm font-semibold text-slate-700 dark:text-[var(--color-text-primary)]">{user?.name || user?.email || 'Zac Admin'}</p>
+              <p className="text-xs text-slate-500">{user?.email || 'admin@zac.ai'}</p>
             </div>
             <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -133,8 +134,8 @@ export default function Header({ onMenuToggle, onNavigate, liveblocksStatus = nu
             <div className="absolute right-0 top-full mt-3 w-56 bg-white dark:bg-[var(--color-bg-surface)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl shadow-lg z-50 overflow-hidden">
               {/* Mobile-only user info */}
               <div className="min-750:hidden px-4 py-3 border-b border-slate-100 dark:border-[var(--color-border-subtle)]">
-                <p className="text-sm font-semibold text-slate-800 dark:text-[var(--color-text-primary)]">Zac Admin</p>
-                <p className="text-xs text-slate-500">admin@zac.ai</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-[var(--color-text-primary)]">{user?.name || 'Zac Admin'}</p>
+                <p className="text-xs text-slate-500">{user?.email || 'admin@zac.ai'}</p>
               </div>
 
               <div className="py-1">

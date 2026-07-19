@@ -148,45 +148,45 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-slate-900">Settings</h2>
-        <p className="text-slate-500 mt-1">Manage your account and preferences.</p>
+      <div className="mb-6 md:mb-8">
+        <h2 className="text-xl md:text-2xl font-bold text-slate-900">Settings</h2>
+        <p className="text-slate-500 mt-1 text-sm md:text-base">Manage your account and preferences.</p>
       </div>
 
       <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] overflow-hidden">
         <div className="border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
-          <nav className="flex overflow-x-auto">
+          <nav className="flex overflow-x-auto scrollbar-thin">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 md:gap-2 px-3 md:px-4 py-2.5 md:py-3 text-xs md:text-sm font-medium whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
                   activeTab === tab.id
                     ? 'border-[var(--color-brand-500)] text-[var(--color-brand-500)]'
                     : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-[var(--color-text-primary)]'
                 }`}
               >
-                <tab.icon className="w-4 h-4" />
+                <tab.icon className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 {tab.label}
               </button>
             ))}
           </nav>
         </div>
 
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           {activeTab === 'profile' && (
-            <form onSubmit={handleProfileSubmit} className="max-w-2xl space-y-6">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-indigo-100 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
-                  <span className="text-2xl font-bold text-indigo-700 dark:text-[var(--color-brand-500)]">
+            <form onSubmit={handleProfileSubmit} className="max-w-2xl space-y-4 md:space-y-6">
+              <div className="flex items-center gap-3 md:gap-4">
+                <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-indigo-100 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
+                  <span className="text-xl md:text-2xl font-bold text-indigo-700 dark:text-[var(--color-brand-500)]">
                     {profile.firstName?.charAt(0)?.toUpperCase() || 'U'}
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">
+                  <h3 className="text-base md:text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">
                     {profile.firstName} {profile.lastName}
                   </h3>
-                  <p className="text-sm text-slate-500">{profile.email}</p>
+                  <p className="text-xs md:text-sm text-slate-500">{profile.email}</p>
                 </div>
               </div>
 

@@ -75,6 +75,19 @@ class SupabaseService {
     return data;
   }
 
+  // Update the current user's profile
+  async updateProfile(userId, updates) {
+    const { data, error } = await this.client
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId)
+      .select('id, name, email, avatar_url')
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
   // Listen for auth state changes
   onAuthStateChange(callback) {
     return this.client.auth.onAuthStateChange(callback);

@@ -5,13 +5,20 @@ import supabaseService from '../services/supabaseService';
 // Load the user's profile from the `profiles` table and merge the name
 // into the auth user object. If no profile row exists yet (e.g. the user
 // was created before the auto-create trigger), we upsert one.
+const splitName = (fullName) => {
+  if (!fullName) return { first_name: undefined, last_name: undefined };
+  const parts = fullName.trim().split(' ');
+  return {
+    first_name: parts[0] || undefined,
+    last_name: parts.slice(1).join(' ') || undefined,
+  };
+};
+
 const loadProfileIntoUser = async (authUser) => {
   if (!authUser) return authUser;
   try {
     let profile = await supabaseService.getProfile(authUser.id);
     if (!profile) {
-      // Trigger may not have created the row (user pre-dates the trigger);
-      // create it from auth metadata.
       profile = await supabaseService.upsertProfile({
         id: authUser.id,
         name: authUser.user_metadata?.name,
@@ -19,19 +26,31 @@ const loadProfileIntoUser = async (authUser) => {
       });
     }
     if (profile) {
+      const nameParts = splitName(profile.name || authUser.user_metadata?.name);
       return {
         ...authUser,
+        ...nameParts,
         name: profile.name || authUser.user_metadata?.name,
         email: profile.email || authUser.email,
         avatar_url: profile.avatar_url,
+        user_metadata: {
+          ...authUser.user_metadata,
+          ...nameParts,
+          name: profile.name || authUser.user_metadata?.name,
+        },
       };
     }
   } catch (err) {
     console.warn('Could not load profile:', err.message);
   }
+  const nameParts = splitName(authUser.user_metadata?.name);
   return {
     ...authUser,
-    name: authUser.user_metadata?.name,
+    ...nameParts,
+    user_metadata: {
+      ...authUser.user_metadata,
+      ...nameParts,
+    },
   };
 };
 
@@ -158,7 +177,20 @@ const useAuthStore = create((set) => ({
     const { error, data } = await supabase.auth.updateUser(updates);
     
     if (!error && data.user) {
-      set({ user: data.user });
+      try {
+        const profileUpdates = {};
+        if (updates.data?.first_name || updates.data?.last_name) {
+          profileUpdates.name = `${updates.data.first_name || ''} ${updates.data.last_name || ''}`.trim();
+        }
+        if (Object.keys(profileUpdates).length > 0) {
+          await supabaseService.updateProfile(data.user.id, profileUpdates);
+        }
+        const user = await loadProfileIntoUser(data.user);
+        set({ user });
+      } catch (err) {
+        console.warn('Could not sync profile:', err.message);
+        set({ user: data.user });
+      }
     }
     
     return { error };
