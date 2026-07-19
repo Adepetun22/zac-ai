@@ -15,8 +15,6 @@ export default function DashboardPage() {
     analytics, 
     isLoading, 
     widgetError,
-    aiModelsError,
-    analyticsError,
     fetchWidgets, 
     fetchAiModels, 
     fetchAnalytics,

@@ -6,9 +6,10 @@ export const useAIStore = create((set, get) => ({
   aiModels: [
     { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', status: 'active', latency: 120, cost: 0.01 },
     { id: 'claude-3.5', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', status: 'active', latency: 150, cost: 0.02 },
-    { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google', status: 'active', latency: 100, cost: 0.015 },
-    { id: 'llama-3', name: 'Llama 3 70B', provider: 'Meta', status: 'active', latency: 200, cost: 0.005 },
-    { id: 'mistral-large', name: 'Mistral Large', provider: 'Mistral AI', status: 'active', latency: 180, cost: 0.012 },
+    { id: 'google/gemma-2b', name: 'Gemma 2B', provider: 'Google/Hugging Face', status: 'active', latency: 100, cost: 0.005 },
+    { id: 'meta-llama/Llama-2-7b-chat-hf', name: 'Llama 2 7B', provider: 'Meta/Hugging Face', status: 'active', latency: 200, cost: 0.005 },
+    { id: 'microsoft/DialoGPT-medium', name: 'DialoGPT', provider: 'Microsoft/Hugging Face', status: 'active', latency: 180, cost: 0.003 },
+    { id: 'mistralai/Mistral-7B-Instruct-v0.1', name: 'Mistral 7B', provider: 'Mistral AI/Hugging Face', status: 'active', latency: 160, cost: 0.008 },
   ],
   
   // Loading states

@@ -78,20 +78,20 @@ const useDashboardStore = create((set) => ({
     if (!userId) return;
     
     try {
-      // First, try to get from Supabase
       let aiModels = [];
       try {
         aiModels = await supabaseService.getAiModels(userId);
       } catch (supabaseError) {
         console.warn('Error fetching AI models from Supabase:', supabaseError);
-        // Fall back to the AI service's available models
+      }
+      
+      if (!aiModels || aiModels.length === 0) {
         aiModels = AIService.getAvailableModels();
       }
       
       set({ aiModels });
     } catch (error) {
       console.error('Error in fetchAiModels:', error);
-      // Use available models from AI service as fallback
       const fallbackModels = AIService.getAvailableModels();
       set({ 
         aiModels: fallbackModels,

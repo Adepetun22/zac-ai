@@ -202,22 +202,20 @@ class SupabaseService {
 
   // Create a new AI model
   async createAiModel(model) {
-    // Only insert columns that exist in the schema. `latency` has a DB
-    // default, and we avoid `select('*')` so a stale schema cache
-    // (missing the `latency` column) can't break the insert.
     const { data, error } = await this.client
       .from('ai_models')
       .insert([{
         name: model.name,
         provider: model.provider,
-        status: model.status,
+        status: model.status || 'inactive',
         cost: model.cost ?? 0,
+        latency: model.latency ?? 0,
         api_requests: model.api_requests ?? 0,
         tokens_processed: model.tokens_processed ?? 0,
         user_id: model.user_id,
         created_at: new Date().toISOString(),
       }])
-      .select('id')
+      .select()
       .single();
 
     if (error) throw error;

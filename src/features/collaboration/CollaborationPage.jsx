@@ -658,7 +658,7 @@ export default function CollaborationPage() {
     }
     
     send('widget:add', widget)
-  }, [send])
+  }, [send, sessionId])
 
   const moveWidget = useCallback(async (id, pos) => {
     setWidgets(prev => prev.map(w => w.id === id ? { ...w, ...pos } : w))
