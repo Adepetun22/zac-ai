@@ -1,5 +1,3 @@
-import { supabase } from '../config/supabase';
-
 class AIService {
   async generateResponse(prompt, modelId = 'gpt-4o') {
     try {
@@ -21,7 +19,7 @@ class AIService {
       }
     } catch (error) {
       console.error('AI Service Error:', error);
-      throw new Error(`AI service error: ${error.message}`);
+      throw new Error(`AI service error: ${error.message}`, { cause: error });
     }
   }
 

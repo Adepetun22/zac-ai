@@ -5,9 +5,6 @@ import { supabase } from '../config/supabase';
  */
 class SupabaseService {
   constructor() {
-    if (!supabase) {
-      throw new Error('Supabase client not initialized. Check your environment variables.');
-    }
     this.client = supabase;
   }
 
