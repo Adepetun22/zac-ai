@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, Users } from 'lucide-react'
+import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, Users, X } from 'lucide-react'
 import { searchIndex } from '../data/searchIndex'
+import useNotificationStore from '../store/notificationStore'
 
 const TYPE_COLORS = {
   Page: 'bg-indigo-50 text-indigo-600',
@@ -13,8 +14,12 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const ref = useRef(null)
   const profileRef = useRef(null)
+  const notificationsRef = useRef(null)
+
+  const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification } = useNotificationStore()
 
   const results = query.trim().length > 0
     ? searchIndex.filter(item =>
@@ -24,10 +29,12 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
       ).slice(0, 8)
     : []
 
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handler = (e) => {
       if (!ref.current?.contains(e.target)) setOpen(false)
       if (!profileRef.current?.contains(e.target)) setProfileOpen(false)
+      if (!notificationsRef.current?.contains(e.target)) setNotificationsOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -37,6 +44,22 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
     onNavigate(item.page)
     setQuery('')
     setOpen(false)
+  }
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffInHours = (now - date) / (1000 * 60 * 60)
+    
+    if (diffInHours < 1) {
+      const diffInMinutes = Math.floor((now - date) / (1000 * 60))
+      return `${diffInMinutes}m ago`
+    } else if (diffInHours < 24) {
+      const diffInHours = Math.floor(diffInHours)
+      return `${diffInHours}h ago`
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    }
   }
 
   return (
@@ -98,22 +121,100 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
             title="Start Collaboration"
           >
             <Users className="w-5 h-5" />
-            {liveblocksStatus && liveblocksStatus.userCount > 0 && (
+            {liveblocksStatus && liveblocksStatus.otherUserCount > 0 && (  // Only show when other users are present
               <span 
                 className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white ${
                   liveblocksStatus.isConnected ? 'bg-green-500' : 'bg-yellow-500'
                 }`}
               >
-                {liveblocksStatus.userCount}
+                {liveblocksStatus.otherUserCount}  {/* Show count of OTHER users */}
               </span>
             )}
           </button>
         )}
         
-        <button className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
+        {/* Notifications dropdown */}
+        <div ref={notificationsRef} className="relative">
+          <button
+            onClick={() => setNotificationsOpen(v => !v)}
+            className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer"
+            title="View notifications"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+            )}
+          </button>
+
+          {notificationsOpen && (
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[var(--color-bg-surface)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl shadow-lg z-50 overflow-hidden">
+              <div className="p-3 border-b border-slate-200 dark:border-[var(--color-border-subtle)] flex items-center justify-between">
+                <h3 className="font-semibold text-slate-800 dark:text-[var(--color-text-primary)]">Notifications</h3>
+                {notifications.length > 0 && (
+                  <button 
+                    onClick={markAllAsRead}
+                    className="text-xs text-indigo-600 dark:text-[var(--color-brand-500)] hover:underline cursor-pointer"
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </div>
+              
+              <div className="max-h-96 overflow-y-auto">
+                {notifications.length > 0 ? (
+                  <ul>
+                    {notifications.map((notification) => (
+                      <li 
+                        key={notification.id} 
+                        className={`p-3 border-b border-slate-100 dark:border-[var(--color-border-subtle)] last:border-b-0 ${
+                          !notification.read ? 'bg-indigo-50 dark:bg-[var(--color-brand-50)]' : ''
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">
+                                {notification.title || notification.message.split(' ')[0]}
+                              </p>
+                              {!notification.read && (
+                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                              )}
+                            </div>
+                            <p className="text-sm text-slate-600 dark:text-[var(--color-text-secondary)] mt-1">
+                              {notification.message}
+                            </p>
+                            <p className="text-xs text-slate-400 dark:text-[var(--color-text-muted)] mt-1">
+                              {formatDate(notification.timestamp)}
+                            </p>
+                          </div>
+                          <button 
+                            onClick={() => removeNotification(notification.id)}
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-[var(--color-text-primary)] ml-2"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {!notification.read && (
+                          <button
+                            onClick={() => markAsRead(notification.id)}
+                            className="mt-2 text-xs text-indigo-600 dark:text-[var(--color-brand-500)] hover:underline cursor-pointer"
+                          >
+                            Mark as read
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="p-6 text-center">
+                    <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm text-slate-500">No notifications yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div ref={profileRef} className="relative">
           <button

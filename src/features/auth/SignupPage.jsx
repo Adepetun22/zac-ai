@@ -11,6 +11,7 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccess('');
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
@@ -33,7 +35,9 @@ export default function SignupPage() {
       if (error) {
         setError(error.message || 'Failed to create account');
       } else {
-        navigate('/dashboard');
+        setSuccess('A confirmation link has been sent to your email. Please check your inbox and click the link to verify your account.');
+        // Don't navigate immediately since user needs to confirm email
+        // navigate('/dashboard');
       }
     } catch (err) {
       setError(err.message || 'An error occurred during sign up');
@@ -54,6 +58,12 @@ export default function SignupPage() {
           {error && (
             <div className="mb-6 p-3 bg-red-50 text-red-700 rounded-lg text-sm">
               {error}
+            </div>
+          )}
+          
+          {success && (
+            <div className="mb-6 p-3 bg-green-50 text-green-700 rounded-lg text-sm">
+              {success}
             </div>
           )}
 

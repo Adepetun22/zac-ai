@@ -20,18 +20,18 @@ export const useLiveblocks = (roomId, currentUser = null) => {
   // Join the room when component mounts
   useEffect(() => {
     mountedRef.current = true;
-    
+
     try {
       const { room: liveblocksRoom, leave } = enterLiveblocksRoom(roomId);
-      
+
       if (mountedRef.current) {
         setRoomData(prev => ({ ...prev, room: liveblocksRoom }));
-        
+
         // Publish our identity so other users see a real name instead of "User <id>"
         if (currentUser?.name) {
-          liveblocksRoom.updateMyPresence({ name: currentUser.name });
+          liveblocksRoom.updatePresence({ name: currentUser.name });
         }
-        
+
         // Subscribe to other users in the room
         const unsubscribeOthers = liveblocksRoom.subscribe('others', (others) => {
           if (mountedRef.current) {
@@ -44,7 +44,8 @@ export const useLiveblocks = (roomId, currentUser = null) => {
                 name: user.presence.name || `User ${user.connectionId}`,
                 cursor: user.presence.cursor,
                 selection: user.presence.selection,
-              }))
+              })),
+              otherUserCount: othersArray.length
             }));
           }
         });
@@ -73,20 +74,32 @@ export const useLiveblocks = (roomId, currentUser = null) => {
 
   const updateCursor = useCallback((newCursor) => {
     if (roomData.room) {
-      roomData.room.updateMyPresence({ cursor: newCursor });
+      roomData.room.updatePresence({ cursor: newCursor });
       setRoomData(prev => ({ ...prev, cursor: newCursor }));
     }
   }, [roomData.room]);
 
   const updateName = useCallback((name) => {
     if (roomData.room) {
-      roomData.room.updateMyPresence({ name });
+      roomData.room.updatePresence({ name });
     }
   }, [roomData.room]);
 
   const updateSelection = useCallback((selection) => {
     if (roomData.room) {
-      roomData.room.updateMyPresence({ selection });
+      roomData.room.updatePresence({ selection });
+    }
+  }, [roomData.room]);
+
+  const sendNotification = useCallback((message) => {
+    if (roomData.room) {
+      roomData.room.updatePresence({ notification: message });
+    }
+  }, [roomData.room]);
+
+  const clearNotification = useCallback(() => {
+    if (roomData.room) {
+      roomData.room.updatePresence({ notification: null });
     }
   }, [roomData.room]);
 
@@ -94,11 +107,14 @@ export const useLiveblocks = (roomId, currentUser = null) => {
     room: roomData.room,
     users: roomData.users,
     others: roomData.others,
+    otherUserCount: roomData.others.length,
     cursor: roomData.cursor,
     error: roomData.error,
     updateCursor,
     updateName,
     updateSelection,
+    sendNotification,
+    clearNotification,
     isLiveblocksEnabled: !!roomData.room,
   };
 };

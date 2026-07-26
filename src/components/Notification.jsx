@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { NotificationContext } from './NotificationContext';
+import useNotificationStore from '../store/notificationStore';
 
 const TYPE_CONFIG = {
   success: {
@@ -68,60 +69,66 @@ function NotificationItem({ notification, onRemove }) {
 
   return (
     <div
-      role="alert"
-      className={`
-        relative flex items-start gap-3 p-4 rounded-lg border shadow-sm
-        min-w-[320px] max-w-sm
-        ${config.bg} ${config.border} ${config.text}
-        transition-all duration-200 ease-out
-        ${isExiting ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0'}
-      `}
-      style={{
-        borderLeftWidth: '4px',
-        borderLeftColor: 'var(--color-brand-500)',
-      }}
+      className={`relative mb-3 w-full max-w-sm rounded-lg border p-4 shadow-lg transition-all duration-200 ${
+        config.bg
+      } ${config.border} ${config.text} ${
+        isExiting ? 'translate-x-full opacity-0' : 'translate-x-0 opacity-100'
+      }`}
     >
-      <span className="mt-0.5 flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-bg-surface)] text-xs font-bold text-[var(--color-text-primary)] shadow-sm shrink-0">
-        {config.icon}
-      </span>
-
-      <div className="flex-1 min-w-0">
-        {notification.title && (
-          <p className="text-sm font-semibold text-[var(--color-text-primary)] mb-0.5">
-            {notification.title}
-          </p>
-        )}
-        <p className="text-sm text-[var(--color-text-secondary)] leading-snug">
-          {notification.message}
-        </p>
-      </div>
-
-      <button
-        onClick={handleClose}
-        className="shrink-0 mt-0.5 p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-overlay)] transition-colors cursor-pointer"
-        aria-label="Dismiss notification"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-
-      {notification.duration && notification.duration > 0 && (
+      <div className="flex items-start gap-3">
         <div
-          className="absolute bottom-0 left-0 h-1 rounded-b-lg bg-[var(--color-brand-500)] opacity-60 transition-all duration-100 ease-linear"
+          className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${
+            config.accent
+          }`}
+        >
+          {config.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          {notification.title && (
+            <p className="font-medium mb-1">{notification.title}</p>
+          )}
+          <p className="text-sm">{notification.message}</p>
+        </div>
+        <button
+          onClick={handleClose}
+          className="ml-2 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-current hover:opacity-70 transition-opacity"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
+      </div>
+      <div className="absolute bottom-0 left-0 h-1 bg-current opacity-10">
+        <div
+          className={`h-full ${config.accent}`}
           style={{ width: `${progress}%` }}
-        />
-      )}
+        ></div>
+      </div>
     </div>
   );
 }
 
 function NotificationContainer({ notifications, onRemove }) {
-  if (notifications.length === 0) return null;
+  const notificationItems = useMemo(() => {
+    // Only show toast notifications (not the persistent ones shown in header)
+    const toastNotifications = notifications.filter(n => n.showInToast !== false);
+    return toastNotifications.slice(0, 5); // Limit to 5 toasts
+  }, [notifications]);
+
+  if (notificationItems.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none">
-      {notifications.map((notification) => (
+    <div className="fixed top-4 right-4 z-50 flex w-full max-w-xs flex-col items-end space-y-2 pointer-events-none">
+      {notificationItems.map((notification) => (
         <div key={notification.id} className="pointer-events-auto">
           <NotificationItem notification={notification} onRemove={onRemove} />
         </div>
@@ -130,18 +137,24 @@ function NotificationContainer({ notifications, onRemove }) {
   );
 }
 
-export const NotificationProvider = ({ children }) => {
-  const [notifications, setNotifications] = useState([]);
+export default function NotificationProvider({ children }) {
+  const { notifications, addNotification: addNotificationToStore, removeNotification: removeNotificationFromStore } = useNotificationStore();
 
-  const addNotification = useCallback((message, type = 'info', title, duration = 4000) => {
-    const id = Date.now() + Math.random();
-    setNotifications((prev) => [...prev, { id, message, type, title, duration }]);
-    return id;
-  }, []);
+  // Add notification to store with toast display
+  const addNotification = useCallback((message, type = 'info', title = null, duration = 5000) => {
+    addNotificationToStore({
+      message,
+      type,
+      title,
+      duration,
+      showInToast: true // Show in toast notification
+    });
+  }, [addNotificationToStore]);
 
+  // Remove notification from store
   const removeNotification = useCallback((id) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }, []);
+    removeNotificationFromStore(id);
+  }, [removeNotificationFromStore]);
 
   return (
     <NotificationContext.Provider value={{ addNotification, removeNotification }}>
@@ -149,6 +162,4 @@ export const NotificationProvider = ({ children }) => {
       <NotificationContainer notifications={notifications} onRemove={removeNotification} />
     </NotificationContext.Provider>
   );
-};
-
-export default NotificationProvider;
+}

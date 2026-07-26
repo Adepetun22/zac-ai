@@ -20,7 +20,7 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
         </button>
         <button
           onClick={() => setConfirmDelete(false)}
-          className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-[var(--color-text-primary)] hover:bg-slate-100 dark:hover:bg-[var(--color-bg-canvas)] rounded transition-colors cursor-pointer"
+          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors cursor-pointer"
           title="Cancel"
         >
           <X className="w-3.5 h-3.5" />
@@ -33,7 +33,7 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
     <div className="flex items-center justify-end gap-2">
       <button
         onClick={() => onRun(model)}
-        className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-[var(--color-brand-500)] hover:bg-indigo-50 dark:hover:bg-[var(--color-brand-50)] rounded transition-colors cursor-pointer"
+        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
         title="Run model"
       >
         <Play className="w-4 h-4" />
@@ -173,11 +173,11 @@ export default function AIModelsPage() {
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingModel, setEditingModel] = useState(null);
-  const { 
-    aiModels, 
-    isLoading, 
-    error, 
-    addAiModel, 
+  const {
+    aiModels,
+    isLoading,
+    error,
+    addAiModel,
     updateAiModel,
     deleteAiModel,
     fetchAiModels,
@@ -190,6 +190,10 @@ export default function AIModelsPage() {
   const filtered = aiModels.filter(m =>
     m.name.toLowerCase().includes(search.toLowerCase()) ||
     m.provider.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const uniqueFiltered = filtered.filter((model, index, self) =>
+    index === self.findIndex(m => m.id === model.id)
   );
 
   const handleRun = async (model) => {
@@ -241,7 +245,7 @@ export default function AIModelsPage() {
       fetchAiModels(user.id);
     }
   }, [user?.id, fetchAiModels]);
-  
+
   if (isLoading && aiModels.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -262,7 +266,7 @@ export default function AIModelsPage() {
           <div className="ml-3">
             <p className="text-sm text-red-700">
               <strong>Error:</strong> {error}
-              <button 
+              <button
                 onClick={clearError}
                 className="ml-4 text-sm font-medium text-red-700 underline"
               >
@@ -290,7 +294,7 @@ export default function AIModelsPage() {
           <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)]">AI Models</h2>
           <p className="text-slate-500 mt-1 text-sm md:text-base">Manage and monitor your AI model configurations.</p>
         </div>
-        <button 
+        <button
           onClick={handleAdd}
           className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer w-full sm:w-auto"
         >
@@ -313,104 +317,108 @@ export default function AIModelsPage() {
           </div>
         </div>
 
-        {/* Mobile card view */}
-        <div className="min-750:hidden p-3 md:p-4 space-y-3">
-          {filtered.length > 0 ? filtered.map((model) => (
-            <div key={model.id} className="p-4 bg-white dark:bg-[var(--color-bg-surface)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] truncate">{model.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{model.provider}</p>
-                  </div>
-                </div>
-                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
-                  model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-600 dark:text-[var(--color-text-secondary)]'
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                  {model.status}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Requests</p>
-                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.api_requests || 0}</p>
-                </div>
-                <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Latency</p>
-                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</p>
-                </div>
-                <div className="p-2 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Cost</p>
-                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.cost != null ? `$${model.cost.toFixed(2)}` : '$0.00'}</p>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <ModelRowActions model={model} onRun={handleRun} onEdit={handleEdit} onDelete={handleDelete} />
-              </div>
-            </div>
-          )) : (
-            <div className="py-10 text-center text-sm text-slate-400">
-              {search ? `No models match "${search}"` : 'No models available'}
-            </div>
-          )}
-        </div>
-
-        {/* Desktop table view */}
-        <div className="hidden min-750:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Model</th>
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Provider</th>
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Requests</th>
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Latency</th>
-                <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Cost</th>
-                <th className="text-right px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-[var(--color-border-subtle)]">
-              {filtered.length > 0 ? filtered.map((model) => (
-                <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
-                  <td className="px-4 md:px-6 py-3 md:py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
-                        <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
-                      </div>
-                      <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.name}</span>
+        <div className="overflow-x-auto">
+          {/* Mobile card view */}
+          <div className="min-750:hidden p-3 md:p-4 space-y-3">
+            {uniqueFiltered.length > 0 ? uniqueFiltered.map((model) => (
+              <div key={model.id} className="p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center shrink-0">
+                      <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
                     </div>
-                  </td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.provider}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-600 dark:text-[var(--color-text-secondary)]'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                      {model.status}
-                    </span>
-                  </td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.api_requests || 0}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost != null ? `$${model.cost.toFixed(2)}/1K` : '$0.00/1K'}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4">
-                    <ModelRowActions model={model} onRun={handleRun} onEdit={handleEdit} onDelete={handleDelete} />
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={7} className="px-4 md:px-6 py-10 text-center text-sm text-slate-400">
-                    {search ? `No models match "${search}"` : 'No models available'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] truncate">{model.name}</p>
+                      <p className="text-xs text-slate-500 truncate">{model.provider}</p>
+                    </div>
+                  </div>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
+                    model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                    {model.status}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="p-2 bg-white dark:bg-[var(--color-bg-surface)] rounded-lg">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">Requests</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.api_requests || 0}</p>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-[var(--color-bg-surface)] rounded-lg">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">Latency</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</p>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-[var(--color-bg-surface)] rounded-lg">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">Cost</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.cost != null ? `$${model.cost.toFixed(2)}` : '$0.00'}</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <ModelRowActions model={model} onRun={handleRun} onEdit={handleEdit} onDelete={handleDelete} />
+                </div>
+              </div>
+            )) : (
+              <div className="py-10 text-center text-sm text-slate-400">
+                {search ? `No models match "${search}"` : 'No models available'}
+              </div>
+            )}
+          </div>
+
+          {/* Desktop table view */}
+          <div className="hidden min-750:block overflow-x-auto -mx-3 md:-mx-4">
+            <div className="px-3 md:px-4">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Model</th>
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Provider</th>
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Requests</th>
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Latency</th>
+                    <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Cost</th>
+                    <th className="text-right px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-[var(--color-border-subtle)]">
+                  {uniqueFiltered.length > 0 ? uniqueFiltered.map((model) => (
+                    <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
+                      <td className="px-4 md:px-6 py-3 md:py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
+                            <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
+                          </div>
+                          <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.provider}</td>
+                      <td className="px-4 md:px-6 py-3 md:py-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                          {model.status}
+                        </span>
+                      </td>
+                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.api_requests || 0}</td>
+                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.latency != null ? `${model.latency}ms` : '0ms'}</td>
+                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.cost != null ? `$${model.cost.toFixed(2)}/1K` : '$0.00/1K'}</td>
+                      <td className="px-4 md:px-6 py-3 md:py-4">
+                        <ModelRowActions model={model} onRun={handleRun} onEdit={handleEdit} onDelete={handleDelete} />
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={7} className="px-4 md:px-6 py-10 text-center text-sm text-slate-400">
+                        {search ? `No models match "${search}"` : 'No models available'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </div>

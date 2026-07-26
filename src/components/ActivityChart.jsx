@@ -1,16 +1,8 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
-const data = [
-  { time: '00:00', requests: 1200 },
-  { time: '04:00', requests: 800 },
-  { time: '08:00', requests: 2100 },
-  { time: '12:00', requests: 3200 },
-  { time: '16:00', requests: 2800 },
-  { time: '20:00', requests: 2400 },
-  { time: '23:59', requests: 1800 },
-]
+export default function ActivityChart({ data = [] }) {
+  const chartData = data.length > 0 ? data : []
 
-export default function ActivityChart() {
   return (
     <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-6">
@@ -26,7 +18,7 @@ export default function ActivityChart() {
       </div>
 
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
+        <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
           <XAxis dataKey="time" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
           <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />

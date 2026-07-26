@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -12,17 +12,28 @@ import useAuthStore from '../../store/authStore'
 import AIService from '../../services/aiService' // Import the AI service
 
 const AI_MODELS = [
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-  { id: 'claude-3.5', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
-  { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google' },
-  { id: 'llama-3', name: 'Llama 3 70B', provider: 'Meta' },
-  { id: 'mistral-large', name: 'Mistral Large', provider: 'Mistral AI' },
+  { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
+  { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
+  { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
+  { id: 'openrouter/poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (Free)', provider: 'OpenRouter' },
+  { id: 'huggingface/free-image', name: 'Free Image Gen (HF)', provider: 'HuggingFace', isImage: true },
 ]
 
 const PEER_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
 function generateInviteCode() {
   return 'ZAC-' + Math.random().toString(36).substring(2, 8).toUpperCase()
+}
+
+function isUUID(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
+}
+
+function extractSessionId(input) {
+  const trimmed = (input || '').trim()
+  const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+  if (uuidMatch) return uuidMatch[0]
+  return trimmed.toUpperCase()
 }
 
 function getPeerColor(id) {
@@ -90,28 +101,64 @@ function parsePrompt(prompt, modelId) {
 // ─── AI Integration ────────────────────────────────────────────────────────────
 async function processAIRequest(prompt, modelId) {
   try {
-    // Use the AI service to get a real response
-    const aiResponse = await AIService.generateResponse(prompt, modelId);
-    
-    // Check if the response suggests creating a chart
-    const parsedResult = parsePrompt(prompt, modelId);
-    
-    // If the prompt suggests a chart, return the chart data
-    if (parsedResult.type !== 'bar' || parsedResult.title !== prompt.slice(0, 40)) {
-      return parsedResult;
+    const p = prompt.toLowerCase()
+    const isImageModel = modelId.includes('FLUX') || modelId.includes('stable') || modelId.includes('flux') || modelId.includes('pollinations') || modelId.includes('free-image') || modelId.includes('huggingface')
+    const isImagePrompt = p.includes('image') || p.includes('picture') || p.includes('photo') || p.includes('draw') || p.includes('illustration') || p.includes('generate an image') || p.includes('create an image')
+    const isChartPrompt = p.includes('chart') || p.includes('graph') || p.includes('plot') || p.includes('revenue') || p.includes('trend') || p.includes('breakdown') || p.includes('distribution') || p.includes('table') || p.includes('usage') || p.includes('sales') || p.includes('quarter')
+
+    if (isImageModel || isImagePrompt) {
+      if (isImageModel) {
+        const imageUrl = await AIService.generateImage(prompt, modelId)
+        if (imageUrl) {
+          return {
+            type: 'image',
+            title: prompt.slice(0, 40),
+            model: modelId,
+            imageUrl,
+          }
+        }
+      } else {
+        return {
+          type: 'text',
+          title: `Image generation not supported`,
+          model: modelId,
+          content: `The selected model (${modelId}) does not support image generation. Switch to an image-capable model to generate images.`,
+        }
+      }
     }
-    
-    // Otherwise, return the actual AI response as text content
+
+    if (isChartPrompt) {
+      const structured = await AIService.generateResponse(prompt, modelId, 'structured')
+      if (structured && typeof structured === 'object' && (structured.type || structured.content)) {
+        return structured
+      }
+    }
+
+    const aiResponse = await AIService.generateResponse(prompt, modelId)
+    if (typeof aiResponse === 'object') return aiResponse
     return {
-      type: 'text', 
-      title: `AI Response: ${prompt.slice(0, 40)}`, 
+      type: 'text',
+      title: `AI Response: ${prompt.slice(0, 40)}`,
       model: modelId,
-      content: aiResponse
-    };
+      content: aiResponse,
+    }
   } catch (error) {
-    console.error('AI processing error:', error);
-    // Fallback to the original parsing logic
-    return parsePrompt(prompt, modelId);
+    console.error('AI processing error:', error)
+    const isImageRequest = prompt.toLowerCase().includes('image') || prompt.toLowerCase().includes('picture') || prompt.toLowerCase().includes('photo') || prompt.toLowerCase().includes('draw')
+    if (isImageRequest) {
+      return {
+        type: 'text',
+        title: `Image generation unavailable`,
+        model: modelId,
+        content: `Image generation is not supported for ${modelId}. Use a dedicated image-generation model to create images.`,
+      }
+    }
+    return {
+      type: 'text',
+      title: `Error: ${error.message}`,
+      model: modelId,
+      content: `Failed to get a response from ${modelId}. ${error.message}`,
+    }
   }
 }
 
@@ -169,10 +216,16 @@ function WidgetChart({ schema }) {
     </div>
   )
 
+  if (schema.type === 'image') return (
+    <div className="p-2">
+      <img src={schema.imageUrl} alt={schema.title} className="w-full h-auto rounded-lg border border-slate-100" />
+    </div>
+  )
+
   return null
 }
 
-const TYPE_ICON = { bar: BarChart2, line: LineChart, pie: PieChart, table: Table2 }
+const TYPE_ICON = { bar: BarChart2, line: LineChart, pie: PieChart, table: Table2, image: ImageIcon }
 
 // ─── Draggable Widget ─────────────────────────────────────────────────────────
 function Widget({ widget, onMove, onRemove }) {
@@ -227,12 +280,44 @@ function Widget({ widget, onMove, onRemove }) {
 // ─── AI Chat Panel ────────────────────────────────────────────────────────────
 function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: 'Hi! Describe a chart or data view and I\'ll add it to the canvas. Try: "Show Q3 revenue" or "Usage breakdown".' }
+    { role: 'assistant', text: 'Hi! Describe a chart or data view and I\'ll add it to the canvas. Try: "Show Q3 revenue" or "Usage breakdown". Note: Responses may be simulated if API keys are not configured.' }
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id)
+  const [selectedModel, setSelectedModel] = useState('openrouter/openai/gpt-oss-20b:free')
   const bottomRef = useRef(null)
+
+  // Check backend status on mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:8787/api/health');
+        const data = await response.json();
+        if (!response.ok) {
+          // Backend is reachable but not responding properly
+          setMessages(prev => [...prev, { 
+            role: 'assistant', 
+            text: '⚠️ Backend server is running but may not have API keys configured. Responses will be simulated.' 
+          }]);
+        } else if (data.providers && (!data.providers.google || !data.providers.openrouter)) {
+          // Backend is running but some API keys are missing
+          setMessages(prev => [...prev, { 
+            role: 'assistant', 
+            text: '⚠️ Some API keys are not configured. Using simulated responses as fallback.' 
+          }]);
+        }
+      } catch (error) {
+        console.warn('Backend status check failed:', error.message);
+        // Backend is not reachable
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          text: '⚠️ Backend server not reachable. Using simulated responses.' 
+        }]);
+      }
+    };
+    
+    checkBackendStatus();
+  }, []);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -254,6 +339,8 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
       
       if (schema.type === 'text') {
         aiResponseText = schema.content
+      } else if (schema.type === 'image') {
+        aiResponseText = `Generated image: "${schema.title}" using ${modelName}.`
       } else {
         aiResponseText += ` as a ${schema.type} chart using ${modelName}.`
       }
@@ -265,9 +352,10 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
       }])
     } catch (error) {
       console.error('Error processing AI request:', error)
+      // Provide more informative error message to the user
       setMessages(m => [...m, {
         role: 'assistant',
-        text: 'Sorry, I encountered an error processing your request. Please try again.',
+        text: `Sorry, I encountered an error processing your request with the selected AI model. The system may be using simulated responses. Try changing the model or simplifying your request.`,
       }])
     } finally {
       setThinking(false)
@@ -466,7 +554,15 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-let widgetIdCounter = 1
+
+function uniqueWidgets(list) {
+  const seen = new Set()
+  return list.filter(w => {
+    if (seen.has(w.id)) return false
+    seen.add(w.id)
+    return true
+  })
+}
 
 export default function CollaborationPage() {
   const [widgets, setWidgets] = useState([])
@@ -475,31 +571,70 @@ export default function CollaborationPage() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteCode, setInviteCode] = useState('')
   const [sessionId, setSessionId] = useState(null)
-  const { user } = useAuthStore()
+  const { user } = useAuthStore();
   const [currentUser] = useState(() => ({
     id: 'user-' + Math.random().toString(36).substring(2, 8),
-    name: 'You',
+    name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
     color: getPeerColor('user-' + Math.random().toString(36).substring(2, 8)),
   }))
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
 
-  // Ensure the current user has a collaboration session (required for RLS),
-  // then load that session's widgets.
+  // Load widgets from localStorage as fallback
+  const loadLocalWidgets = useCallback(() => {
+    try {
+      const stored = localStorage.getItem('zac-collab-widgets');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setWidgets(parsed);
+      }
+    } catch (e) {
+      console.warn('Could not load local widgets:', e);
+    }
+  }, []);
+
+  const saveLocalWidgets = useCallback((widgets) => {
+    try {
+      localStorage.setItem('zac-collab-widgets', JSON.stringify(widgets));
+    } catch (e) {
+      console.warn('Could not save local widgets:', e);
+    }
+  }, []);
+
+  // Ensure a collaboration session exists for the current user
   useEffect(() => {
-    if (!supabase || !user?.id) return;
+    if (!user?.id || sessionId) return;
 
     let active = true;
     (async () => {
       try {
+        if (!supabase) return;
         const sid = await supabaseService.ensureUserSession(user.id);
         if (!active) return;
         setSessionId(sid);
+      } catch (error) {
+        console.warn('Could not ensure collaboration session:', error.message);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [user?.id, sessionId]);
+
+  // Load widgets from Supabase whenever the session changes
+  useEffect(() => {
+    if (!sessionId) return;
+
+    (async () => {
+      try {
+        if (!supabase) {
+          loadLocalWidgets();
+          return;
+        }
 
         const { data, error } = await supabase
           .from('dashboard_widgets')
           .select('*')
-          .eq('session_id', sid)
+          .eq('session_id', sessionId)
           .order('created_at', { ascending: true });
 
         if (error) throw error;
@@ -511,18 +646,21 @@ export default function CollaborationPage() {
           y: widget.position_y || 40,
         }));
 
-        setWidgets(loadedWidgets);
+        if (loadedWidgets.length > 0) {
+          setWidgets(loadedWidgets);
+        } else {
+          loadLocalWidgets();
+        }
       } catch (error) {
-        console.error('Error loading widgets:', error);
+        console.warn('Could not load widgets from Supabase, using local storage:', error.message);
+        loadLocalWidgets();
       }
     })();
-
-    return () => { active = false; };
-  }, [user?.id]);
+  }, [sessionId, loadLocalWidgets]);
 
   // Subscribe to real-time widget changes from Supabase
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !sessionId) return;
 
     const channel = supabase
       .channel('widgets-changes')
@@ -532,6 +670,7 @@ export default function CollaborationPage() {
           event: '*',
           schema: 'public',
           table: 'dashboard_widgets',
+          filter: `session_id=eq.${sessionId}`,
         },
         (payload) => {
           const widget = payload.new || payload.old;
@@ -539,12 +678,12 @@ export default function CollaborationPage() {
 
           switch (payload.eventType) {
             case 'INSERT':
-              setWidgets(prev => [...prev, {
+              setWidgets(prev => uniqueWidgets([...prev, {
                 id: widget.id,
                 schema: widget.schema,
                 x: widget.position_x || 40,
                 y: widget.position_y || 40,
-              }]);
+              }]));
               break;
             case 'UPDATE':
               setWidgets(prev =>
@@ -566,30 +705,44 @@ export default function CollaborationPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [sessionId]);
 
   const updateCursorDOM = useCallback(({ peerId, name, color, x, y }) => {
+    // Get the canvas container bounds for relative positioning
+    const canvasElement = canvasRef.current;
+    if (!canvasElement) return;
+    
+    const canvasRect = canvasElement.getBoundingClientRect();
+    
+    // Convert page coordinates to canvas-relative coordinates
+    const canvasRelativeX = x - canvasRect.left;
+    const canvasRelativeY = y - canvasRect.top;
+    
+    // Ensure the cursor element exists in the DOM
     if (!cursorsRef.current[peerId]) {
       const el = document.createElement('div')
       el.id = `cursor-${peerId}`
-      el.style.cssText = `position:fixed;pointer-events:none;z-index:9999;transition:left 0.3s ease,top 0.3s ease;`
+      el.style.cssText = `position:absolute;pointer-events:none;z-index:9999;transition:left 0.3s ease,top 0.3s ease;`
       el.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M0 0L0 12L3.5 8.5L6 14L8 13L5.5 7.5L10 7.5L0 0Z" fill="${color}" stroke="white" stroke-width="1"/>
         </svg>
         <span style="margin-left:6px;font-size:11px;font-weight:600;color:#fff;background:${color};padding:1px 6px;border-radius:4px;">${name}</span>
       `
-      document.body.appendChild(el)
+      canvasElement.appendChild(el)
       cursorsRef.current[peerId] = el
     }
     const el = cursorsRef.current[peerId]
-    el.style.left = `${x}px`
-    el.style.top = `${y}px`
+    el.style.left = `${canvasRelativeX}px`
+    el.style.top = `${canvasRelativeY}px`
   }, [])
 
   const removeCursorDOM = useCallback((peerId) => {
-    cursorsRef.current[peerId]?.remove()
-    delete cursorsRef.current[peerId]
+    // Remove cursor element from DOM and from reference
+    if (cursorsRef.current[peerId]) {
+      cursorsRef.current[peerId].remove()
+      delete cursorsRef.current[peerId]
+    }
   }, [])
 
   const addPeer = useCallback((peer) => {
@@ -597,50 +750,73 @@ export default function CollaborationPage() {
   }, [])
 
   const removePeer = useCallback((peerId) => {
-    setPeers(p => { const n = { ...p }; delete n[peerId]; return n })
-    removeCursorDOM(peerId)
+    setPeers(p => { 
+      const n = { ...p }; 
+      delete n[peerId]; 
+      return n 
+    })
+    // Add a small delay before removing cursor to ensure proper cleanup
+    setTimeout(() => removeCursorDOM(peerId), 100)
   }, [removeCursorDOM])
 
   const { send } = useWebSocket({
+    room: sessionId,
+    user: currentUser,
     onCursorMove: updateCursorDOM,
-    onWidgetSync: (widget) => setWidgets(prev =>
+    onWidgetSync: (widget) => setWidgets(prev => uniqueWidgets(
       prev.find(w => w.id === widget.id)
         ? prev.map(w => w.id === widget.id ? { ...w, ...widget } : w)
         : [...prev, widget]
-    ),
+    )),
     onPeerJoin: (peer) => addPeer(peer),
     onPeerLeave: (peerId) => removePeer(peerId),
-    onInviteCreate: (payload) => {
-      if (payload.userId === currentUser.id) {
-        setInviteCode(payload.code)
-      }
-    },
-    onPeerInvite: (peer) => addPeer(peer),
   })
 
   useEffect(() => {
-    const handler = (e) => send('cursor:move', { x: e.clientX, y: e.clientY })
+    const handler = (e) => {
+      // Only send cursor movement if we have a valid connection
+      if (sessionId) {
+        send('cursor:move', {
+          peerId: currentUser.id,
+          name: currentUser.name,
+          color: currentUser.color,
+          x: e.clientX,
+          y: e.clientY,
+        })
+      }
+    }
     window.addEventListener('mousemove', handler)
     return () => window.removeEventListener('mousemove', handler)
-  }, [send])
+  }, [send, currentUser, sessionId])
 
   useEffect(() => {
     const cursors = cursorsRef.current
-    return () => Object.keys(cursors).forEach(removeCursorDOM)
-  }, [removeCursorDOM])
+    return () => {
+      // Clean up all cursor elements when component unmounts
+      Object.keys(cursors).forEach(key => {
+        if (cursors[key]) {
+          cursors[key].remove()
+        }
+      })
+    }
+  }, [])
 
   const addWidget = useCallback(async (schema) => {
-    const id = `widget-${widgetIdCounter++}`
+    const id = crypto.randomUUID()
     const widget = {
       id,
       schema,
-      x: 40 + ((widgetIdCounter * 60) % 300),
-      y: 40 + ((widgetIdCounter * 40) % 200),
+      x: 40 + (Math.random() * 260),
+      y: 40 + (Math.random() * 160),
     }
     
-    setWidgets(prev => [...prev, widget])
+    setWidgets(prev => {
+      const next = uniqueWidgets([...prev, widget])
+      saveLocalWidgets(next)
+      return next
+    })
     
-    // Save to Supabase if available
+    // Try to save to Supabase, fallback to local storage
     if (supabase && sessionId) {
       try {
         await supabase
@@ -648,38 +824,46 @@ export default function CollaborationPage() {
           .insert([{
             id: widget.id,
             schema: widget.schema,
-            position_x: widget.x,
-            position_y: widget.y,
+            position_x: Math.round(widget.x),
+            position_y: Math.round(widget.y),
             session_id: sessionId,
           }]);
       } catch (error) {
-        console.error('Error saving widget:', error);
+        console.warn('Could not save widget to Supabase, using local storage:', error.message);
       }
     }
     
     send('widget:add', widget)
-  }, [send, sessionId])
+  }, [send, sessionId, saveLocalWidgets])
 
   const moveWidget = useCallback(async (id, pos) => {
-    setWidgets(prev => prev.map(w => w.id === id ? { ...w, ...pos } : w))
+    setWidgets(prev => {
+      const next = prev.map(w => w.id === id ? { ...w, ...pos } : w)
+      saveLocalWidgets(next)
+      return next
+    })
     
     // Update in Supabase if available
     if (supabase) {
       try {
         await supabase
           .from('dashboard_widgets')
-          .update({ position_x: pos.x, position_y: pos.y })
+          .update({ position_x: Math.round(pos.x), position_y: Math.round(pos.y) })
           .eq('id', id);
       } catch (error) {
-        console.error('Error updating widget position:', error);
+        console.warn('Could not update widget position in Supabase:', error.message);
       }
     }
     
     send('widget:move', { id, ...pos })
-  }, [send])
+  }, [send, saveLocalWidgets])
 
   const removeWidget = useCallback(async (id) => {
-    setWidgets(prev => prev.filter(w => w.id !== id))
+    setWidgets(prev => {
+      const next = prev.filter(w => w.id !== id)
+      saveLocalWidgets(next)
+      return next
+    })
     
     // Remove from Supabase if available
     if (supabase) {
@@ -689,30 +873,58 @@ export default function CollaborationPage() {
           .delete()
           .eq('id', id);
       } catch (error) {
-        console.error('Error removing widget:', error);
+        console.warn('Could not remove widget from Supabase:', error.message);
       }
     }
-  }, [])
+  }, [saveLocalWidgets])
 
   const handleCreateInvite = () => {
-    const code = generateInviteCode()
-    setInviteCode(code)
+    // The session id is the real room key — sharing it lets another user join
+    // the same Supabase Realtime channel and see each other's cursors/widgets.
+    setInviteCode(sessionId || generateInviteCode())
     setInviteDialogOpen(true)
-    send('invite:create', { userId: currentUser.id, code })
   }
 
   const handleJoinSession = (code) => {
-    const newPeer = {
-      id: 'peer-' + Math.random().toString(36).substring(2, 8),
-      name: 'Guest',
-      color: getPeerColor(code),
+    const session = extractSessionId(code)
+    if (!session) {
+      setInviteDialogOpen(false)
+      return
     }
-    addPeer(newPeer)
-    send('peer:invite', { code, peer: newPeer })
-    setInviteDialogOpen(false)
+    
+    if (!supabase || !isUUID(session)) {
+      setSessionId(session)
+      setInviteDialogOpen(false)
+      return
+    }
+    
+    supabase
+      .from('collaboration_sessions')
+      .select('id')
+      .eq('id', session)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.id) {
+          return supabase
+            .from('session_participants')
+            .upsert({ session_id: data.id, user_id: user?.id || currentUser.id }, { onConflict: ['session_id', 'user_id'] })
+            .then(() => data.id)
+        }
+        return session
+      })
+      .then((resolvedId) => {
+        setSessionId(resolvedId)
+        setInviteDialogOpen(false)
+      })
+      .catch((error) => {
+        console.warn('Could not join session via Supabase, using local mode:', error.message)
+        setSessionId(session)
+        setInviteDialogOpen(false)
+      })
   }
 
-  const peerList = Object.values(peers)
+  // Calculate peer list from the local state (peers)
+  const peerList = Object.values(peers).filter(peer => peer.id !== currentUser.id);
 
   return (
     <div className="flex h-full -m-4 min-750:-m-6 min-1440:-m-8 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
@@ -729,7 +941,7 @@ export default function CollaborationPage() {
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
 
-        {/* Peer presence bar */}
+        {/* Peer presence bar - using local peer state */}
         {peerList.length > 0 && (
           <div className="absolute top-4 left-4 z-10 flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium shadow-sm"
             style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-secondary)' }}>

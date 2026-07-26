@@ -1,7 +1,7 @@
 -- Create dashboard_widgets table
 CREATE TABLE IF NOT EXISTS dashboard_widgets (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  session_id VARCHAR(255) NOT NULL,
+  session_id UUID NOT NULL,
   schema JSONB NOT NULL,
   position_x INTEGER DEFAULT 0,
   position_y INTEGER DEFAULT 0,
@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   name TEXT,
   email TEXT,
   avatar_url TEXT,
+  default_session_id UUID,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -109,6 +110,11 @@ DROP POLICY IF EXISTS "Users can view widgets in their sessions" ON dashboard_wi
 DROP POLICY IF EXISTS "Users can insert widgets in their sessions" ON dashboard_widgets;
 DROP POLICY IF EXISTS "Users can update widgets in their sessions" ON dashboard_widgets;
 DROP POLICY IF EXISTS "Users can delete widgets in their sessions" ON dashboard_widgets;
+DROP POLICY IF EXISTS "Users can view their own sessions" ON collaboration_sessions;
+DROP POLICY IF EXISTS "Users can insert their own sessions" ON collaboration_sessions;
+DROP POLICY IF EXISTS "Users can view session participants" ON session_participants;
+DROP POLICY IF EXISTS "Users can insert session participants" ON session_participants;
+DROP POLICY IF EXISTS "Users can delete session participants" ON session_participants;
 DROP POLICY IF EXISTS "Users can view their own ai_models" ON ai_models;
 DROP POLICY IF EXISTS "Users can insert their own ai_models" ON ai_models;
 DROP POLICY IF EXISTS "Users can update their own ai_models" ON ai_models;
@@ -122,10 +128,6 @@ DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 
 -- Create policies for profiles
-DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
-DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
-DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
-
 CREATE POLICY "Users can view their own profile" ON profiles
     FOR SELECT TO authenticated
     USING (id = auth.uid());
@@ -139,14 +141,35 @@ CREATE POLICY "Users can update their own profile" ON profiles
     USING (id = auth.uid())
     WITH CHECK (id = auth.uid());
 
+-- Create policies for collaboration_sessions
+CREATE POLICY "Users can view their own sessions" ON collaboration_sessions
+    FOR SELECT TO authenticated
+    USING (created_by = auth.uid());
+
+CREATE POLICY "Users can insert their own sessions" ON collaboration_sessions
+    FOR INSERT TO authenticated
+    WITH CHECK (created_by = auth.uid());
+
+-- Create policies for session_participants
+CREATE POLICY "Users can view session participants" ON session_participants
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert session participants" ON session_participants
+    FOR INSERT TO authenticated
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete session participants" ON session_participants
+    FOR DELETE TO authenticated
+    USING (user_id = auth.uid());
+
 -- Create policies for dashboard_widgets
--- Note: dashboard_widgets.session_id is VARCHAR while collaboration_sessions.id is UUID,
--- so we cast the UUID to text to avoid "operator does not exist: character varying = uuid"
+-- dashboard_widgets.session_id is now UUID, matching collaboration_sessions.id
 CREATE POLICY "Users can view widgets in their sessions" ON dashboard_widgets
     FOR SELECT TO authenticated
     USING (
         session_id IN (
-            SELECT s.id::text FROM collaboration_sessions s
+            SELECT s.id FROM collaboration_sessions s
             JOIN session_participants sp ON s.id = sp.session_id
             WHERE sp.user_id = auth.uid()
         )
@@ -156,7 +179,7 @@ CREATE POLICY "Users can insert widgets in their sessions" ON dashboard_widgets
     FOR INSERT TO authenticated
     WITH CHECK (
         session_id IN (
-            SELECT s.id::text FROM collaboration_sessions s
+            SELECT s.id FROM collaboration_sessions s
             JOIN session_participants sp ON s.id = sp.session_id
             WHERE sp.user_id = auth.uid()
         )
@@ -166,7 +189,7 @@ CREATE POLICY "Users can update widgets in their sessions" ON dashboard_widgets
     FOR UPDATE TO authenticated
     USING (
         session_id IN (
-            SELECT s.id::text FROM collaboration_sessions s
+            SELECT s.id FROM collaboration_sessions s
             JOIN session_participants sp ON s.id = sp.session_id
             WHERE sp.user_id = auth.uid()
         )
@@ -176,7 +199,7 @@ CREATE POLICY "Users can delete widgets in their sessions" ON dashboard_widgets
     FOR DELETE TO authenticated
     USING (
         session_id IN (
-            SELECT s.id::text FROM collaboration_sessions s
+            SELECT s.id FROM collaboration_sessions s
             JOIN session_participants sp ON s.id = sp.session_id
             WHERE sp.user_id = auth.uid()
         )

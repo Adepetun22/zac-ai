@@ -30,7 +30,7 @@ export const enterLiveblocksRoom = (roomId) => {
         batch: (callback) => callback(),
         getStorage: () => Promise.resolve({ root: { toImmutable: () => ({}) } }),
         getSelf: () => ({ id: "mock-user", info: { name: "Mock User" } }),
-        updateMyPresence: () => {},
+        updatePresence: () => {},
         history: {
           undo: () => {},
           redo: () => {},

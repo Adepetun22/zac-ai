@@ -1,136 +1,164 @@
 class AIService {
-  async generateResponse(prompt, modelId = 'gpt-4o') {
-    try {
-      if (import.meta.env.VITE_OPENAI_API_KEY && 
-          (modelId.startsWith('gpt') || ['gpt-4o', 'gpt-3.5'].includes(modelId))) {
-        return await this.callOpenAI(prompt, modelId);
-      }
-      
-      if (import.meta.env.VITE_ANTHROPIC_API_KEY && 
-          (modelId.startsWith('claude') || modelId.includes('claude'))) {
-        return await this.callAnthropic(prompt, modelId);
-      }
-      
-      if (import.meta.env.VITE_HUGGING_FACE_API_KEY && modelId.includes('/')) {
-        return await this.callHuggingFace(prompt, modelId);
-      }
-      
-      return this.simulateAIResponse(prompt, modelId);
-    } catch (error) {
-      console.error('AI Service Error:', error);
-      return this.simulateAIResponse(prompt, modelId);
-    }
+  constructor() {
+    this.backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8787/api';
   }
 
-  async callOpenAI(prompt, modelId) {
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.7,
-          max_tokens: 1000
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.choices[0].message.content;
-    } catch (error) {
-      console.warn('OpenAI call failed, falling back to simulation:', error.message);
-      return this.simulateAIResponse(prompt, modelId);
+  async generateResponse(prompt, modelId = 'openrouter/openai/gpt-oss-20b:free', type = 'text') {
+    const result = await this.callBackendAI(prompt, modelId, type);
+    if (result !== null && result !== undefined) {
+      if (type === 'structured' && result.schema) return result.schema
+      if (type === 'image' && result.imageUrl) return result.imageUrl
+      if (result.text) return result.text
+      return result
     }
+    if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
+    return this.simulateAIResponse(prompt, modelId)
   }
 
-  async callAnthropic(prompt, modelId) {
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: modelId,
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Anthropic API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.content[0].text;
-    } catch (error) {
-      console.warn('Anthropic call failed, falling back to simulation:', error.message);
-      return this.simulateAIResponse(prompt, modelId);
-    }
+  async generateImage(prompt, modelId = 'huggingface/free-image') {
+    const result = await this.callBackendImage(prompt, modelId)
+    if (result && result.imageUrl) return result.imageUrl
+    throw new Error(`Image generation not available for ${modelId}`)
   }
 
-  async callHuggingFace(prompt, modelId) {
+  async callBackendImage(prompt, modelId) {
     try {
-      const huggingFaceModel = modelId.includes('/') ? modelId : 'microsoft/DialoGPT-medium';
-      
-      const response = await fetch(
-        `https://api-inference.huggingface.co/models/${huggingFaceModel}`,
-        {
-          headers: { Authorization: `Bearer ${import.meta.env.VITE_HUGGING_FACE_API_KEY}` },
-          method: 'POST',
-          body: JSON.stringify({
-            inputs: prompt,
-            parameters: {
-              max_new_tokens: 200,
-              return_full_text: false
-            }
-          })
-        }
-      );
-
+      const response = await fetch(`${this.backendUrl}/image?prompt=${encodeURIComponent(prompt)}`)
       if (!response.ok) {
-        throw new Error(`Hugging Face API error: ${response.status}`);
+        const text = await response.text()
+        console.error('[ERROR] Backend image API error:', response.status, text)
+        return null
       }
-      
-      const data = await response.json();
-      return Array.isArray(data) && data[0]?.generated_text 
-        ? data[0].generated_text 
-        : data.generated_text || 'No response generated';
+      return await response.json()
     } catch (error) {
-      console.warn('HuggingFace call failed, falling back to simulation:', error.message);
-      return this.simulateAIResponse(prompt, modelId);
+      console.error('Backend image call failed:', error.message)
+      return null
     }
   }
 
   simulateAIResponse(prompt, modelId) {
-    // Simulated response for development/testing purposes
     const responses = {
-      'gpt-4o': `This is a simulated response from GPT-4o for your prompt: "${prompt}". In a real implementation, this would connect to the OpenAI API.`,
-      'claude-3.5': `This is a simulated response from Claude 3.5 for your prompt: "${prompt}". In a real implementation, this would connect to the Anthropic API.`,
-      'gemini-pro': `This is a simulated response from Gemini Pro for your prompt: "${prompt}". In a real implementation, this would connect to the Google AI API.`,
-      'llama-3': `This is a simulated response from Llama 3 for your prompt: "${prompt}". In a real implementation, this would connect to the Meta AI API.`
+      'llama-3-70b': `This is a simulated response from Llama 3 70B for your prompt: "${prompt}". In a real implementation, this would connect to the Meta AI API.`,
+      'google/gemini-2.5-flash-image': `This is a simulated response from Google Gemini for your prompt: "${prompt}". In a real implementation, this would connect to the Google AI API.`
     };
 
     return responses[modelId] || `Simulated response for: ${prompt}`;
   }
 
+  simulateStructuredResponse(prompt, modelId) {
+    const p = prompt.toLowerCase()
+    if (p.includes('q3') || p.includes('quarter') || p.includes('revenue') || p.includes('sales')) {
+      return {
+        type: 'bar', title: 'Q3 Revenue Summary', model: modelId,
+        data: [
+          { label: 'Jul', value: 42000 }, { label: 'Aug', value: 58000 },
+          { label: 'Sep', value: 51000 },
+        ],
+      }
+    }
+    if (p.includes('trend') || p.includes('growth') || p.includes('over time') || p.includes('weekly')) {
+      return {
+        type: 'line', title: 'Growth Trend', model: modelId,
+        data: [
+          { label: 'W1', value: 120 }, { label: 'W2', value: 145 },
+          { label: 'W3', value: 132 }, { label: 'W4', value: 178 },
+        ],
+      }
+    }
+    if (p.includes('breakdown') || p.includes('distribution') || p.includes('share') || p.includes('usage')) {
+      return {
+        type: 'pie', title: 'Usage Distribution', model: modelId,
+        data: [
+          { label: 'GPT-4o', value: 45 }, { label: 'Claude', value: 30 },
+          { label: 'Gemini', value: 15 }, { label: 'Other', value: 10 },
+        ],
+      }
+    }
+    if (p.includes('table') || p.includes('list') || p.includes('log') || p.includes('summar')) {
+      return {
+        type: 'table', title: 'Activity Summary', model: modelId,
+        data: [
+          { label: 'GPT-4o', value: '45.2K requests' },
+          { label: 'Claude 3.5', value: '32.1K requests' },
+          { label: 'Gemini Pro', value: '28.4K requests' },
+        ],
+      }
+    }
+    return {
+      type: 'bar', title: prompt.slice(0, 40), model: modelId,
+      data: [
+        { label: 'A', value: Math.floor(Math.random() * 80 + 20) },
+        { label: 'B', value: Math.floor(Math.random() * 80 + 20) },
+        { label: 'C', value: Math.floor(Math.random() * 80 + 20) },
+      ],
+    }
+  }
+
+  async callBackendAI(prompt, modelId, type = 'text') {
+    try {
+      console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
+      const response = await fetch(`${this.backendUrl}/ai`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          modelId,
+          type
+        })
+      });
+
+      console.log('[DEBUG] Backend response status:', response.status);
+      const data = await response.json();
+      console.log('[DEBUG] Backend response data:', data);
+      
+      if (!response.ok) {
+        const message = data?.error || `HTTP ${response.status}`;
+        console.error('[ERROR] Backend AI API error:', response.status, message, data.detail);
+        throw new Error(`Backend AI API error ${response.status}: ${message}`);
+      }
+
+      return data;
+    } catch (error) {
+      const isNetworkError = error instanceof TypeError && error.message === 'Failed to fetch'
+      if (isNetworkError) {
+        console.warn('[WARN] Backend AI proxy is unavailable at', this.backendUrl, '- falling back to simulated response.');
+        return null;
+      }
+      console.warn('Backend AI call failed:', error.message, error.stack);
+      throw error;
+    }
+  }
+
+  // Removed direct API call methods since they're handled by the backend proxy
+  // callOpenAI, callAnthropic, and callHuggingFace are now handled server-side
+
   // Method to get available models
   getAvailableModels() {
     return [
-      { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', status: 'active', cost: 0.12, latency: 450, api_requests: 0, tokens_processed: 0 },
-      { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', status: 'active', cost: 0.15, latency: 520, api_requests: 0, tokens_processed: 0 },
-      { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google', status: 'active', cost: 0.10, latency: 380, api_requests: 0, tokens_processed: 0 },
-      { id: 'llama-3-70b', name: 'Llama 3 70B', provider: 'Meta', status: 'inactive', cost: 0.05, latency: 600, api_requests: 0, tokens_processed: 0 },
-      { id: 'mistral-large', name: 'Mistral Large', provider: 'Mistral AI', status: 'active', cost: 0.11, latency: 410, api_requests: 0, tokens_processed: 0 },
+      { 
+        id: 'llama-3-70b', 
+        name: 'Llama 3 70B', 
+        provider: 'Meta', 
+        status: 'active', 
+        cost: 0.05, 
+        latency: 600, 
+        api_requests: 0, 
+        tokens_processed: 0,
+        capabilities: ['text', 'code', 'chat']
+      },
+      { 
+        id: 'google/gemini-2.5-flash-image', 
+        name: 'Gemini 2.5 Flash Image', 
+        provider: 'Google', 
+        status: 'active', 
+        cost: 0.001, 
+        latency: 3000, 
+        api_requests: 0, 
+        tokens_processed: 0,
+        capabilities: ['text', 'image', 'multimodal']
+      },
     ];
   }
 }

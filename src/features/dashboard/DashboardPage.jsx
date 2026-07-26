@@ -15,37 +15,43 @@ export default function DashboardPage() {
     analytics, 
     isLoading, 
     widgetError,
-    fetchWidgets, 
-    fetchAiModels, 
-    fetchAnalytics,
-    clearError
+    metrics,
+    fetchDashboardData,
+    clearError,
+    transformAnalyticsToActivityChart,
+    transformAnalyticsToRecentActivity,
+    transformModelsToUsageChart,
+    computeMetrics
   } = useDashboardStore();
 
   useEffect(() => {
     if (user?.id) {
-      // Fetch dashboard data when user is authenticated
-      fetchWidgets(user.id);
-      fetchAiModels(user.id);
-      fetchAnalytics(user.id);
+      fetchDashboardData(user.id);
     }
-  }, [user?.id, fetchWidgets, fetchAiModels, fetchAnalytics]);
+  }, [user?.id, fetchDashboardData]);
 
-  // Calculate metrics based on fetched data
-  const totalApiRequests = widgets.reduce((sum, widget) => sum + (widget.api_requests || 0), 0);
-  const totalTokensProcessed = widgets.reduce((sum, widget) => sum + (widget.tokens_processed || 0), 0);
-  const totalCost = aiModels.reduce((sum, model) => sum + (model.cost || 0), 0);
-  const activeModels = aiModels.length;
+  useEffect(() => {
+    computeMetrics()
+  }, [aiModels, computeMetrics])
 
-  // Format metrics for display
-  const formattedApiRequests = totalApiRequests >= 1000000 
-    ? `${(totalApiRequests / 1000000).toFixed(1)}M` 
-    : totalApiRequests.toString();
-  
-  const formattedTokensProcessed = totalTokensProcessed >= 1000000 
-    ? `${(totalTokensProcessed / 1000000).toFixed(1)}M` 
-    : totalTokensProcessed.toString();
+  const activityChartData = transformAnalyticsToActivityChart(analytics)
+  const usageChartData = transformModelsToUsageChart(aiModels)
+  const recentActivities = transformAnalyticsToRecentActivity(analytics, aiModels)
 
-  // Handle loading and error states
+  const formatNumber = (num) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
+    return num.toString()
+  }
+
+  const formatCurrency = (num) => `$${num.toFixed(2)}`
+
+  const getChangeValue = (change) => {
+    if (change > 0) return `+${change.toFixed(1)}%`
+    if (change < 0) return `${change.toFixed(1)}%`
+    return '0.0%'
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -89,29 +95,29 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <MetricCard
           title="Total API Requests"
-          value={formattedApiRequests}
-          change="+12.5%"
+          value={formatNumber(metrics.totalApiRequests)}
+          change={getChangeValue(metrics.apiRequestChange)}
           icon={MessageSquare}
           color="indigo"
         />
         <MetricCard
           title="Tokens Processed"
-          value={formattedTokensProcessed}
-          change="+8.2%"
+          value={formatNumber(metrics.totalTokensProcessed)}
+          change={getChangeValue(metrics.tokensChange)}
           icon={Coins}
           color="blue"
         />
         <MetricCard
           title="Total Cost"
-          value={`$${totalCost.toFixed(2)}`}
-          change="-3.1%"
+          value={formatCurrency(metrics.totalCost)}
+          change={getChangeValue(metrics.costChange)}
           icon={DollarSign}
           color="green"
         />
         <MetricCard
           title="Active Models"
-          value={activeModels.toString()}
-          change={`+${aiModels.filter(m => m.status === 'active').length}`}
+          value={metrics.activeModels.toString()}
+          change={getChangeValue(metrics.modelChange)}
           icon={Cpu}
           color="amber"
         />
@@ -119,15 +125,15 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="lg:col-span-2">
-          <ActivityChart data={analytics} />
+          <ActivityChart data={activityChartData} />
         </div>
         <div>
-          <UsageChart data={analytics} />
+          <UsageChart data={usageChartData} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        <RecentActivity activities={analytics.slice(0, 5)} />
+        <RecentActivity activities={recentActivities} />
       </div>
     </div>
   );

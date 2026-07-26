@@ -1,64 +1,118 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../config/supabase';
 
-// Fallback simulated peers when Liveblocks is not configured
-const SIMULATED_PEERS = [
-  { id: 'peer-1', name: 'Alex', color: '#10b981' },
-  { id: 'peer-2', name: 'Maya', color: '#f59e0b' },
-];
+/**
+ * Real-time multiplayer presence + cursor sync backed by Supabase Realtime.
+ *
+ * - Real users join the same `room` (session) channel and appear as peers via
+ *   Supabase Presence (no simulated bots).
+ * - Cursor moves are broadcast peer-to-peer over the channel (low latency).
+ * - Widget changes are broadcast so every participant stays in sync.
+ *
+ * When Supabase is not configured the hook is a no-op so the page still renders.
+ */
+export function useWebSocket({
+  room,
+  user,
+  onCursorMove,
+  onWidgetSync,
+  onPeerJoin,
+  onPeerLeave,
+}) {
+  const channelRef = useRef(null);
+  const callbacks = useRef({});
 
-export function useWebSocket({ onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave, onInviteCreate, onPeerInvite }) {
-  const intervals = useRef([]);
-  const connected = useRef(false);
+  // Keep latest callbacks available to the channel handlers without re-subscribing.
+  useEffect(() => {
+    callbacks.current = { onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave };
+  }, [onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave]);
 
-  const send = useCallback((type, payload) => {
-    // Fallback to current simulated behavior
-    if (type === 'widget:move' || type === 'widget:add') {
-      onWidgetSync?.(payload);
+  const send = useCallback(async (type, payload) => {
+    const channel = channelRef.current;
+    if (!channel || channel.state !== 'SUBSCRIBED') return;
+
+    if (type === 'cursor:move') {
+      await channel.send({ type: 'broadcast', event: 'cursor', payload });
+    } else if (type === 'widget:move' || type === 'widget:add') {
+      await channel.send({ type: 'broadcast', event: 'widget', payload: { ...payload, op: type } });
+      callbacks.current.onWidgetSync?.(payload);
+    } else if (type === 'peer:invite') {
+      await channel.send({ type: 'broadcast', event: 'peer-invite', payload });
+    } else if (type === 'invite:create') {
+      callbacks.current.onPeerInvite?.(payload);
     }
-    if (type === 'invite:create') {
-      onInviteCreate?.(payload);
-    }
-    if (type === 'peer:invite') {
-      onPeerInvite?.(payload);
-    }
-  }, [onWidgetSync, onInviteCreate, onPeerInvite]);
+  }, []);
 
   useEffect(() => {
-    connected.current = true;
-    
-    // Fallback to simulated behavior when Liveblocks is not configured
-    const peerIntervals = [];
+    if (!supabase || !room || !user?.id) return;
 
-    // Simulate peers joining
-    const joinTimers = SIMULATED_PEERS.map((peer, i) =>
-      setTimeout(() => {
-        if (!connected.current) return
-        onPeerJoin?.(peer)
+    const channel = supabase.channel(`collab:${room}`, {
+      config: {
+        presence: { key: user.id },
+        broadcast: { self: false },
+      },
+    });
 
-        // Simulate cursor movement for each peer
-        const interval = setInterval(() => {
-          if (!connected.current) return
-          onCursorMove?.({
-            peerId: peer.id,
-            name: peer.name,
-            color: peer.color,
-            x: 100 + Math.random() * (window.innerWidth - 300),
-            y: 100 + Math.random() * (window.innerHeight - 200),
-          })
-        }, 1200 + i * 400)
+    channelRef.current = channel;
 
-        peerIntervals.push(interval)
-        intervals.current.push(interval)
-      }, 800 + i * 600)
-    )
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        Object.values(state).forEach((presences) => {
+          presences.forEach((p) => {
+            if (p.id !== user.id) callbacks.current.onPeerJoin?.(p);
+          });
+        });
+      })
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        newPresences.forEach((p) => {
+          if (p.id !== user.id) {
+            // Add a delay to ensure proper initialization before triggering join
+            setTimeout(() => callbacks.current.onPeerJoin?.(p), 100);
+          }
+        });
+      })
+      .on('presence', { event: 'leave' }, ({ key, oldPresences }) => {
+        // Ensure we only process the leave event once
+        if (key !== user.id) {
+          callbacks.current.onPeerLeave?.(key);
+        }
+      })
+      .on('broadcast', { event: 'cursor' }, ({ payload }) => {
+        callbacks.current.onCursorMove?.(payload);
+      })
+      .on('broadcast', { event: 'widget' }, ({ payload }) => {
+        callbacks.current.onWidgetSync?.(payload);
+      });
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        // Track user presence with retry logic in case of failure
+        const trackUser = () => {
+          channel.track({
+            id: user.id,
+            name: user.name || 'Anonymous',
+            color: user.color,
+          }).catch(error => {
+            console.warn('Failed to track user presence, retrying...', error);
+            // Retry tracking after a short delay
+            setTimeout(trackUser, 1000);
+          });
+        };
+        
+        trackUser();
+      }
+    });
 
     return () => {
-      connected.current = false
-      joinTimers.forEach(clearTimeout)
-      peerIntervals.forEach(clearInterval)
-      SIMULATED_PEERS.forEach(peer => onPeerLeave?.(peer.id))
-    }
-  }, [onCursorMove, onPeerJoin, onPeerLeave]);
+      // Only untrack if channel exists and is subscribed
+      if (channelRef.current && channelRef.current.state === 'SUBSCRIBED') {
+        channel.untrack().catch(() => {}); // Ignore untrack errors
+      }
+      supabase.removeChannel(channel);
+      channelRef.current = null;
+    };
+  }, [room, user?.id, user?.name, user?.color]);
 
   return { send };
 }

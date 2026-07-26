@@ -4,12 +4,10 @@ import AIService from '../services/aiService';
 export const useAIStore = create((set, get) => ({
   // Available AI models
   aiModels: [
-    { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', status: 'active', latency: 120, cost: 0.01 },
-    { id: 'claude-3.5', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', status: 'active', latency: 150, cost: 0.02 },
-    { id: 'google/gemma-2b', name: 'Gemma 2B', provider: 'Google/Hugging Face', status: 'active', latency: 100, cost: 0.005 },
-    { id: 'meta-llama/Llama-2-7b-chat-hf', name: 'Llama 2 7B', provider: 'Meta/Hugging Face', status: 'active', latency: 200, cost: 0.005 },
-    { id: 'microsoft/DialoGPT-medium', name: 'DialoGPT', provider: 'Microsoft/Hugging Face', status: 'active', latency: 180, cost: 0.003 },
-    { id: 'mistralai/Mistral-7B-Instruct-v0.1', name: 'Mistral 7B', provider: 'Mistral AI/Hugging Face', status: 'active', latency: 160, cost: 0.008 },
+    { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
+    { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
+    { id: 'openrouter/meta-llama/llama-3.1-70b-instruct:free', name: 'Llama 3.1 70B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
+    { id: 'openrouter/google/gemma-4-31b-it:free', name: 'Gemma 4 31B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
   ],
   
   // Loading states

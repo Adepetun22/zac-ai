@@ -124,30 +124,24 @@ class SupabaseService {
 
   // Create a new dashboard widget (must supply a session_id)
   async createWidget(widget) {
-    const { data, error } = await this.client
+    const { error } = await this.client
       .from('dashboard_widgets')
       .insert([{
         ...widget,
         created_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
+      }]);
 
     if (error) throw error;
-    return data;
   }
 
   // Update an existing dashboard widget
   async updateWidget(id, updates) {
-    const { data, error } = await this.client
+    const { error } = await this.client
       .from('dashboard_widgets')
       .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    
+      .eq('id', id);
+
     if (error) throw error;
-    return data;
   }
 
   // Delete a dashboard widget
@@ -167,15 +161,27 @@ class SupabaseService {
    * before reading/writing widgets. Returns the session id.
    */
   async ensureUserSession(userId) {
-    const sessionId = `default-${userId}`;
+    const sessionId = crypto.randomUUID();
 
-    await this.client
-      .from('collaboration_sessions')
-      .upsert({ id: sessionId, created_by: userId });
+    if (this.client) {
+      try {
+        const { data: { session } } = await this.client.auth.getSession();
+        if (!session) {
+          console.warn('Supabase: no active auth session, skipping collaboration session creation');
+          return sessionId;
+        }
 
-    await this.client
-      .from('session_participants')
-      .upsert({ session_id: sessionId, user_id: userId }, { onConflict: ['session_id', 'user_id'] });
+        await this.client
+          .from('collaboration_sessions')
+          .insert({ id: sessionId, created_by: userId });
+
+        await this.client
+          .from('session_participants')
+          .upsert({ session_id: sessionId, user_id: userId }, { onConflict: ['session_id', 'user_id'] });
+      } catch (error) {
+        console.warn('Could not ensure collaboration session:', error.message);
+      }
+    }
 
     return sessionId;
   }
@@ -196,7 +202,7 @@ class SupabaseService {
 
   // Create a new AI model
   async createAiModel(model) {
-    const { data, error } = await this.client
+    const { error } = await this.client
       .from('ai_models')
       .insert([{
         name: model.name,
@@ -208,25 +214,19 @@ class SupabaseService {
         tokens_processed: model.tokens_processed ?? 0,
         user_id: model.user_id,
         created_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
+      }]);
 
     if (error) throw error;
-    return data;
   }
 
   // Update an AI model
   async updateAiModel(id, updates) {
-    const { data, error } = await this.client
+    const { error } = await this.client
       .from('ai_models')
       .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+      .eq('id', id);
     
     if (error) throw error;
-    return data;
   }
 
   // Delete an AI model
