@@ -291,7 +291,8 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_BACKEND_URL?.replace('/api', '') || 'http://localhost:8787'}/api/health`);
+        const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace('/api', '').replace(/\/$/, '') || ''
+        const response = await fetch(`${backendUrl}/api/health`);
         const data = await response.json();
         if (!response.ok) {
           // Backend is reachable but not responding properly

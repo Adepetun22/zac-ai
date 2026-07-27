@@ -261,9 +261,12 @@ const useDashboardStore = create((set, get) => ({
 
   fetchDashboardData: async (userId) => {
     if (!userId) return
-    const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace('/api', '') || 'http://localhost:8787'
+    const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace('/api', '').replace(/\/$/, '') || ''
     try {
-      const response = await fetch(`${backendUrl}/api/dashboard?userId=${encodeURIComponent(userId)}`)
+      const url = backendUrl
+        ? `${backendUrl}/api/dashboard?userId=${encodeURIComponent(userId)}`
+        : `/api/dashboard?userId=${encodeURIComponent(userId)}`
+      const response = await fetch(url)
       if (!response.ok) throw new Error(`Backend responded with ${response.status}`)
       const data = await response.json()
       if (data.metrics) {

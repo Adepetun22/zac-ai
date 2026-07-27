@@ -1,6 +1,6 @@
 class AIService {
   constructor() {
-    this.backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8787/api';
+    this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   }
 
   async generateResponse(prompt, modelId = 'openrouter/openai/gpt-oss-20b:free', type = 'text') {
@@ -23,7 +23,10 @@ class AIService {
 
   async callBackendImage(prompt, modelId) {
     try {
-      const response = await fetch(`${this.backendUrl}/image?prompt=${encodeURIComponent(prompt)}`)
+      const url = this.backendUrl
+        ? `${this.backendUrl}/image?prompt=${encodeURIComponent(prompt)}`
+        : `/image?prompt=${encodeURIComponent(prompt)}`
+      const response = await fetch(url)
       if (!response.ok) {
         const text = await response.text()
         console.error('[ERROR] Backend image API error:', response.status, text)
@@ -97,7 +100,9 @@ class AIService {
   async callBackendAI(prompt, modelId, type = 'text') {
     try {
       console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
-      const response = await fetch(`${this.backendUrl}/ai`, {
+      const response = await fetch(
+        this.backendUrl ? `${this.backendUrl}/ai` : '/ai',
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

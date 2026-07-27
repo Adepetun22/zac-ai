@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import axios from 'axios'
 import dotenv from 'dotenv'
+import { createClient } from '@supabase/supabase-js'
 
 dotenv.config()
 
@@ -16,6 +17,12 @@ const allowedOrigins = [
 app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ limit: '10mb', extended: true }))
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -253,6 +260,55 @@ app.get('/api/image', async (req, res) => {
 
   const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
   res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
+})
+
+app.get('/api/dashboard', async (req, res) => {
+  const userId = req.query.userId
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+
+  try {
+    if (!supabase) {
+      return res.status(500).json({ error: 'Supabase not configured on backend' })
+    }
+
+    const { data: aiModels, error: modelsError } = await supabase
+      .from('ai_models')
+      .select('*')
+      .eq('user_id', userId)
+
+    if (modelsError) throw modelsError
+
+    const { data: analytics, error: analyticsError } = await supabase
+      .from('analytics_data')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (analyticsError) throw analyticsError
+
+    const totalApiRequests = (aiModels || []).reduce((sum, model) => sum + (model.api_requests || 0), 0)
+    const totalTokensProcessed = (aiModels || []).reduce((sum, model) => sum + (model.tokens_processed || 0), 0)
+    const totalCost = (aiModels || []).reduce((sum, model) => sum + (model.cost || 0), 0)
+    const activeModels = (aiModels || []).filter(m => m.status === 'active').length
+
+    res.json({
+      metrics: {
+        totalApiRequests,
+        totalTokensProcessed,
+        totalCost,
+        activeModels,
+        apiRequestChange: 0,
+        tokensChange: 0,
+        costChange: 0,
+        modelChange: 0,
+      },
+      aiModels: aiModels || [],
+      analytics: analytics || [],
+    })
+  } catch (error) {
+    console.error('[ERROR] Dashboard API error:', error.message)
+    res.status(500).json({ error: 'Dashboard fetch failed', detail: error.message })
+  }
 })
 
 app.listen(PORT, () => {
