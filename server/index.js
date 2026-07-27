@@ -6,7 +6,7 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 const app = express()
-const PORT = process.env.AI_PROXY_PORT || 8787
+const PORT = process.env.PORT || process.env.AI_PROXY_PORT || 8787
 
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
@@ -164,7 +164,7 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:5173',
+      'HTTP-Referer': 'https://zac-ai.netlify.app',
       'X-Title': 'Zac-AI-Dashboard'
     }
   })
