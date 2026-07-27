@@ -8,7 +8,12 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || process.env.AI_PROXY_PORT || 8787
 
-app.use(cors())
+const allowedOrigins = [
+  'https://zac-ai.netlify.app',
+  'http://localhost:5173',
+  'http://localhost:3000'
+]
+app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ limit: '10mb', extended: true }))
 
