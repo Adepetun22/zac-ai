@@ -10,7 +10,6 @@ import useAuthStore from '../../store/authStore';
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const { 
-    widgets, 
     aiModels, 
     analytics, 
     isLoading, 

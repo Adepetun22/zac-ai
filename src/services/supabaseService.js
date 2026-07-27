@@ -102,7 +102,9 @@ class SupabaseService {
     const { data, error } = await this.client
       .from('session_participants')
       .select('session_id')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
 
     if (error) throw error;
     return (data || []).map((row) => row.session_id);
@@ -113,13 +115,23 @@ class SupabaseService {
     const sessionIds = await this.getUserSessionIds(userId);
     if (sessionIds.length === 0) return [];
 
-    const { data, error } = await this.client
-      .from('dashboard_widgets')
-      .select('*')
-      .in('session_id', sessionIds);
+    const MAX_IN_BATCH = 25;
+    let allWidgets = [];
 
-    if (error) throw error;
-    return data;
+    for (let i = 0; i < sessionIds.length; i += MAX_IN_BATCH) {
+      const batch = sessionIds.slice(i, i + MAX_IN_BATCH);
+      const { data, error } = await this.client
+        .from('dashboard_widgets')
+        .select('*')
+        .in('session_id', batch);
+
+      if (error) throw error;
+      if (data && data.length > 0) {
+        allWidgets = allWidgets.concat(data);
+      }
+    }
+
+    return allWidgets;
   }
 
   // Create a new dashboard widget (must supply a session_id)
@@ -161,15 +173,25 @@ class SupabaseService {
    * before reading/writing widgets. Returns the session id.
    */
   async ensureUserSession(userId) {
-    const sessionId = crypto.randomUUID();
-
     if (this.client) {
       try {
         const { data: { session } } = await this.client.auth.getSession();
         if (!session) {
           console.warn('Supabase: no active auth session, skipping collaboration session creation');
-          return sessionId;
+          return crypto.randomUUID();
         }
+
+        const { data: existing, error: existingError } = await this.client
+          .from('session_participants')
+          .select('session_id')
+          .eq('user_id', userId)
+          .limit(1);
+
+        if (!existingError && existing && existing.length > 0) {
+          return existing[0].session_id;
+        }
+
+        const sessionId = crypto.randomUUID();
 
         await this.client
           .from('collaboration_sessions')
@@ -178,12 +200,14 @@ class SupabaseService {
         await this.client
           .from('session_participants')
           .upsert({ session_id: sessionId, user_id: userId }, { onConflict: ['session_id', 'user_id'] });
+
+        return sessionId;
       } catch (error) {
         console.warn('Could not ensure collaboration session:', error.message);
       }
     }
 
-    return sessionId;
+    return crypto.randomUUID();
   }
   /**
    * AI Models operations

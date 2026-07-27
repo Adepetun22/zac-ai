@@ -72,7 +72,7 @@ export function useWebSocket({
           }
         });
       })
-      .on('presence', { event: 'leave' }, ({ key, oldPresences }) => {
+      .on('presence', { event: 'leave' }, ({ key }) => {
         // Ensure we only process the leave event once
         if (key !== user.id) {
           callbacks.current.onPeerLeave?.(key);

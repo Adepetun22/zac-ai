@@ -21,7 +21,7 @@ class AIService {
     throw new Error(`Image generation not available for ${modelId}`)
   }
 
-  async callBackendImage(prompt, modelId) {
+  async callBackendImage(prompt, _modelId) {
     try {
       const url = this.backendUrl
         ? `${this.backendUrl}/image?prompt=${encodeURIComponent(prompt)}`

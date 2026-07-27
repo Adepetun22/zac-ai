@@ -47,57 +47,6 @@ function getPeerColor(id) {
 // ─── Prompt Parser ────────────────────────────────────────────────────────────
 const CHART_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
 
-function parsePrompt(prompt, modelId) {
-  const p = prompt.toLowerCase()
-
-  if (p.includes('q3') || p.includes('quarter') || p.includes('revenue') || p.includes('sales')) {
-    return {
-      type: 'bar', title: 'Q3 Revenue Summary', model: modelId,
-      data: [
-        { label: 'Jul', value: 42000 }, { label: 'Aug', value: 58000 },
-        { label: 'Sep', value: 51000 },
-      ],
-    }
-  }
-  if (p.includes('trend') || p.includes('growth') || p.includes('over time') || p.includes('weekly')) {
-    return {
-      type: 'line', title: 'Growth Trend', model: modelId,
-      data: [
-        { label: 'W1', value: 120 }, { label: 'W2', value: 145 },
-        { label: 'W3', value: 132 }, { label: 'W4', value: 178 },
-      ],
-    }
-  }
-  if (p.includes('breakdown') || p.includes('distribution') || p.includes('share') || p.includes('usage')) {
-    return {
-      type: 'pie', title: 'Usage Distribution', model: modelId,
-      data: [
-        { label: 'GPT-4o', value: 45 }, { label: 'Claude', value: 30 },
-        { label: 'Gemini', value: 15 }, { label: 'Other', value: 10 },
-      ],
-    }
-  }
-  if (p.includes('table') || p.includes('list') || p.includes('log') || p.includes('summar')) {
-    return {
-      type: 'table', title: 'Activity Summary', model: modelId,
-      data: [
-        { label: 'GPT-4o', value: '45.2K requests' },
-        { label: 'Claude 3.5', value: '32.1K requests' },
-        { label: 'Gemini Pro', value: '28.4K requests' },
-      ],
-    }
-  }
-
-  return {
-    type: 'bar', title: prompt.slice(0, 40), model: modelId,
-    data: [
-      { label: 'A', value: Math.floor(Math.random() * 80 + 20) },
-      { label: 'B', value: Math.floor(Math.random() * 80 + 20) },
-      { label: 'C', value: Math.floor(Math.random() * 80 + 20) },
-    ],
-  }
-}
-
 // ─── AI Integration ────────────────────────────────────────────────────────────
 async function processAIRequest(prompt, modelId) {
   try {

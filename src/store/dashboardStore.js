@@ -24,7 +24,7 @@ const useDashboardStore = create((set, get) => ({
   },
 
   computeMetrics: () => {
-    const { widgets, aiModels } = get()
+    const { aiModels } = get()
     const totalApiRequests = aiModels.reduce((sum, model) => sum + (model.api_requests || 0), 0)
     const totalTokensProcessed = aiModels.reduce((sum, model) => sum + (model.tokens_processed || 0), 0)
     const totalCost = aiModels.reduce((sum, model) => sum + (model.cost || 0), 0)

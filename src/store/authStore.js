@@ -1,6 +1,7 @@
 ﻿import { create } from 'zustand';
 import { supabase } from '../config/supabase';
 import supabaseService from '../services/supabaseService';
+import useNotificationStore from './notificationStore';
 
 // Load the user's profile from the `profiles` table and merge the name
 // into the auth user object. If no profile row exists yet (e.g. the user
@@ -55,10 +56,30 @@ const loadProfileIntoUser = async (authUser) => {
 };
 
 
-const useAuthStore = create((set) => ({
+const useAuthStore = create((set, get) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
+  sessionTimeoutMs: 30 * 60 * 1000,
+  warningTimeoutMs: 5 * 60 * 1000,
+  logoutTimer: null,
+  warningTimer: null,
+  
+  resetSessionTimer: () => {
+    const { logoutTimer, warningTimer, sessionTimeoutMs, warningTimeoutMs } = get();
+    if (logoutTimer) clearTimeout(logoutTimer);
+    if (warningTimer) clearTimeout(warningTimer);
+    
+    const logoutId = setTimeout(() => {
+      get().signOut();
+    }, sessionTimeoutMs);
+    
+    const warningId = setTimeout(() => {
+      useNotificationStore.getState().addUserNotification('Session expiring soon', 'You will be signed out due to inactivity');
+    }, sessionTimeoutMs - warningTimeoutMs);
+    
+    set({ logoutTimer: logoutId, warningTimer: warningId });
+  },
   
   initAuth: async () => {
     if (!supabase) {
@@ -68,6 +89,7 @@ const useAuthStore = create((set) => ({
         isAuthenticated: true,
         isLoading: false
       });
+      get().resetSessionTimer();
       return;
     }
     
@@ -87,15 +109,40 @@ const useAuthStore = create((set) => ({
     
     // Listen for auth changes
     const { data: { subscription } } = await supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
         const user = session?.user ? await loadProfileIntoUser(session.user) : null;
         set({ 
           user,
           isAuthenticated: !!session,
           isLoading: false
         });
+        
+        if (event === 'SIGNED_IN' && session) {
+          get().resetSessionTimer();
+        } else if (event === 'SIGNED_OUT') {
+          const { logoutTimer, warningTimer } = get();
+          if (logoutTimer) clearTimeout(logoutTimer);
+          if (warningTimer) clearTimeout(warningTimer);
+          set({ logoutTimer: null, warningTimer: null });
+        }
       }
     );
+    
+    // Set up inactivity timer if authenticated
+    if (session) {
+      get().resetSessionTimer();
+      const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+      const handleActivity = () => get().resetSessionTimer();
+      activityEvents.forEach(event => document.addEventListener(event, handleActivity, { passive: true }));
+      
+      return () => {
+        subscription.unsubscribe();
+        activityEvents.forEach(event => document.removeEventListener(event, handleActivity));
+        const { logoutTimer, warningTimer } = get();
+        if (logoutTimer) clearTimeout(logoutTimer);
+        if (warningTimer) clearTimeout(warningTimer);
+      };
+    }
     
     return () => {
       subscription.unsubscribe();

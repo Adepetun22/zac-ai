@@ -91,7 +91,7 @@ async function callOpenAI(prompt, modelId, apiKey, type) {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'openai', modelId }
-    } catch (_) {}
+    } catch { /* ignore parse error */ }
     return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'openai', modelId }
   }
   return { text, provider: 'openai', modelId }
@@ -126,7 +126,7 @@ async function callAnthropic(prompt, modelId, apiKey, type) {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'anthropic', modelId }
-    } catch (_) {}
+    } catch { /* ignore parse error */ }
     return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'anthropic', modelId }
   }
   return { text, provider: 'anthropic', modelId }
@@ -158,7 +158,7 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'google', modelId }
-    } catch (_) {}
+    } catch { /* ignore parse error */ }
     return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'google', modelId }
   }
   return { text, provider: 'google', modelId }
@@ -186,7 +186,7 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'openrouter', modelId }
-    } catch (_) {}
+    } catch { /* ignore parse error */ }
     return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'openrouter', modelId }
   }
   return { text, provider: 'openrouter', modelId }

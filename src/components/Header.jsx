@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, Users, X } from 'lucide-react'
 import { searchIndex } from '../data/searchIndex'
 import useNotificationStore from '../store/notificationStore'
+import useAuthStore from '../store/authStore'
 
 const TYPE_COLORS = {
   Page: 'bg-indigo-50 text-indigo-600',
@@ -256,7 +257,11 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
 
               <div className="border-t border-slate-100 dark:border-[var(--color-border-subtle)] py-1">
                 <button
-                  onMouseDown={() => { onNavigate('login'); setProfileOpen(false) }}
+                  onMouseDown={() => {
+                    useAuthStore.getState().signOut();
+                    onNavigate('login');
+                    setProfileOpen(false);
+                  }}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" /> Sign out

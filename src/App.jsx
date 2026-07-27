@@ -123,7 +123,6 @@ function App() {
     others,
     otherUserCount, // Get otherUserCount directly from the hook
     isLiveblocksEnabled,
-    error
   } = useLiveblocks('dashboard-app', user); // Changed from 'app-main-room' to a more generic name
 
   // Get collaboration status for UI indicators
@@ -169,8 +168,8 @@ function App() {
     prevOthersRef.current = currentOthers;
   }, [others, addUserNotification]);
 
-  // Wrap everything in Router
-  const AppContent = () => (
+  // Conditionally render LiveblocksProvider based on whether client is available
+  const innerContent = (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route
@@ -217,19 +216,18 @@ function App() {
     </Router>
   );
 
-  // Conditionally render LiveblocksProvider based on whether client is available
   if (liveblocksClient && publicApiKey) {
     return (
       <LiveblocksProvider publicApiKey={publicApiKey} resolveUsers={resolveUsers} resolveRooms={resolveRooms}>
         <NotificationProvider>
-          <AppContent />
+          {innerContent}
         </NotificationProvider>
       </LiveblocksProvider>
     );
   } else {
     return (
       <NotificationProvider>
-        <AppContent />
+        {innerContent}
       </NotificationProvider>
     );
   }

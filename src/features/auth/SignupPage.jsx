@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 
@@ -14,7 +14,6 @@ export default function SignupPage() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const navigate = useNavigate();
   const { signUp } = useAuthStore();
 
   const handleSubmit = async (e) => {
@@ -37,7 +36,6 @@ export default function SignupPage() {
       } else {
         setSuccess('A confirmation link has been sent to your email. Please check your inbox and click the link to verify your account.');
         // Don't navigate immediately since user needs to confirm email
-        // navigate('/dashboard');
       }
     } catch (err) {
       setError(err.message || 'An error occurred during sign up');
