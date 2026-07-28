@@ -4,10 +4,10 @@ import AIService from '../services/aiService';
 export const useAIStore = create((set, get) => ({
   // Available AI models
   aiModels: [
+    { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
     { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
     { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
     { id: 'openrouter/meta-llama/llama-3.1-70b-instruct:free', name: 'Llama 3.1 70B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
-    { id: 'openrouter/google/gemma-4-31b-it:free', name: 'Gemma 4 31B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0 },
   ],
   
   // Loading states
@@ -50,24 +50,29 @@ export const useAIStore = create((set, get) => ({
         ]
       };
       
-      set({ 
-        conversations: updatedConversations,
-        isLoading: false 
-      });
-      
-      return response;
+      set({ conversations: updatedConversations, isLoading: false });
     } catch (error) {
       set({ error: error.message, isLoading: false });
-      throw error;
     }
   },
   
-  // Clear a specific conversation
-  clearConversation: (modelId) => {
-    const { conversations } = get();
-    const updatedConversations = { ...conversations };
-    delete updatedConversations[modelId];
-    set({ conversations: updatedConversations });
+  // Add a new conversation
+  addConversation: (conversationId, initialMessage) => {
+    set(state => ({
+      conversations: {
+        ...state.conversations,
+        [conversationId]: initialMessage ? [initialMessage] : []
+      }
+    }));
+  },
+  
+  // Clear a conversation
+  clearConversation: (conversationId) => {
+    set(state => {
+      const updatedConversations = { ...state.conversations };
+      delete updatedConversations[conversationId];
+      return { conversations: updatedConversations };
+    });
   },
   
   // Clear all conversations
@@ -75,39 +80,21 @@ export const useAIStore = create((set, get) => ({
     set({ conversations: {} });
   },
   
-  // Add a custom AI model
-  addCustomModel: (modelData) => {
-    const { aiModels } = get();
-    const newModel = {
-      id: modelData.id || `custom-${Date.now()}`,
-      name: modelData.name,
-      provider: modelData.provider || 'Custom',
-      status: 'active',
-      latency: modelData.latency || 0,
-      cost: modelData.cost || 0,
-      ...modelData
-    };
-    
-    set({ aiModels: [...aiModels, newModel] });
-  },
-  
-  // Delete an AI model
-  deleteModel: (modelId) => {
-    const { aiModels } = get();
-    set({ aiModels: aiModels.filter(model => model.id !== modelId) });
-  },
-  
   // Update model status
   updateModelStatus: (modelId, status) => {
-    const { aiModels } = get();
-    const updatedModels = aiModels.map(model => 
-      model.id === modelId ? { ...model, status } : model
-    );
-    set({ aiModels: updatedModels });
+    set(state => ({
+      aiModels: state.aiModels.map(model => 
+        model.id === modelId ? { ...model, status } : model
+      )
+    }));
   },
   
-  // Clear any errors
-  clearError: () => {
-    set({ error: null });
+  // Update model stats
+  updateModelStats: (modelId, stats) => {
+    set(state => ({
+      aiModels: state.aiModels.map(model => 
+        model.id === modelId ? { ...model, ...stats } : model
+      )
+    }));
   }
 }));

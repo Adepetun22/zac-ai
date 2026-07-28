@@ -140,8 +140,18 @@ function NotificationContainer({ notifications, onRemove }) {
 export default function NotificationProvider({ children }) {
   const { notifications, addNotification: addNotificationToStore, removeNotification: removeNotificationFromStore } = useNotificationStore();
 
-  // Add notification to store with toast display
+  // Add notification to store with toast display and rate limiting
   const addNotification = useCallback((message, type = 'info', title = null, duration = 5000) => {
+    // Check for duplicate notifications in the last 2 seconds
+    const recentDuplicate = notifications.some(n => 
+      n.message === message && 
+      Date.now() - new Date(n.timestamp).getTime() < 2000
+    );
+    
+    if (recentDuplicate) {
+      return; // Skip adding duplicate notification
+    }
+    
     addNotificationToStore({
       message,
       type,
@@ -149,7 +159,7 @@ export default function NotificationProvider({ children }) {
       duration,
       showInToast: true // Show in toast notification
     });
-  }, [addNotificationToStore]);
+  }, [addNotificationToStore, notifications]);
 
   // Remove notification from store
   const removeNotification = useCallback((id) => {

@@ -153,7 +153,10 @@ function App() {
     // Find new users who joined
     currentOthers.forEach(current => {
       if (!prevOthers.includes(current)) {
-        addUserNotification(current, 'joined');
+        // Only add notification if there are actually other users (not just the current user)
+        if (others.length > 0) {
+          addUserNotification(current, 'joined');
+        }
       }
     });
 
@@ -166,7 +169,7 @@ function App() {
 
     // Update ref with current others
     prevOthersRef.current = currentOthers;
-  }, [others, addUserNotification]);
+  }, [others]); // Remove addUserNotification from dependencies to prevent continuous re-execution
 
   // Conditionally render LiveblocksProvider based on whether client is available
   const innerContent = (

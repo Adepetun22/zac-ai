@@ -3,14 +3,36 @@ class AIService {
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   }
 
-  async generateResponse(prompt, modelId = 'openrouter/openai/gpt-oss-20b:free', type = 'text') {
-    const result = await this.callBackendAI(prompt, modelId, type);
-    if (result !== null && result !== undefined) {
-      if (type === 'structured' && result.schema) return result.schema
-      if (type === 'image' && result.imageUrl) return result.imageUrl
-      if (result.text) return result.text
-      return result
+  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text') {
+    try {
+      const result = await this.callBackendAI(prompt, modelId, type);
+      if (result !== null && result !== undefined) {
+        if (type === 'structured' && result.schema) return result.schema
+        if (type === 'image' && result.imageUrl) return result.imageUrl
+        if (result.text) return result.text
+        return result
+      }
+    } catch (error) {
+      console.warn(`Primary model ${modelId} failed:`, error.message);
+      // Try fallback models when the primary model fails
+      const fallbackModels = this.getFallbackModels(modelId);
+      for (const fallbackModel of fallbackModels) {
+        try {
+          console.log(`Trying fallback model: ${fallbackModel}`);
+          const result = await this.callBackendAI(prompt, fallbackModel, type);
+          if (result !== null && result !== undefined) {
+            if (type === 'structured' && result.schema) return result.schema
+            if (type === 'image' && result.imageUrl) return result.imageUrl
+            if (result.text) return result.text
+            return result
+          }
+        } catch (fallbackError) {
+          console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message);
+          continue; // Try the next fallback model
+        }
+      }
     }
+    
     if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
     return this.simulateAIResponse(prompt, modelId)
   }
@@ -164,6 +186,41 @@ class AIService {
         tokens_processed: 0,
         capabilities: ['text', 'image', 'multimodal']
       },
+    ];
+  }
+
+  // Helper method to get fallback models based on the primary model
+  getFallbackModels(primaryModelId) {
+    // Define fallback chains for different models
+    const fallbackChains = {
+      'openrouter/openai/gpt-oss-20b:free': [
+        'openrouter/google/gemma-4-26b-a4b-it:free',
+        'openrouter/cohere/north-mini-code:free',
+        'openrouter/anthropic/claude-3-haiku:free'
+      ],
+      'openrouter/poolside/laguna-s-2.1:free': [
+        'openrouter/google/gemma-4-26b-a4b-it:free',
+        'openrouter/cohere/north-mini-code:free',
+        'openrouter/openai/gpt-oss-20b:free'
+      ],
+      'openrouter/cohere/north-mini-code:free': [
+        'openrouter/google/gemma-4-26b-a4b-it:free',
+        'openrouter/openai/gpt-oss-20b:free',
+        'openrouter/anthropic/claude-3-haiku:free'
+      ],
+      'openrouter/google/gemma-4-26b-a4b-it:free': [
+        'openrouter/cohere/north-mini-code:free',
+        'openrouter/openai/gpt-oss-20b:free',
+        'openrouter/anthropic/claude-3-haiku:free'
+      ]
+    };
+    
+    // Return the fallback chain for the given model, or a general fallback list
+    return fallbackChains[primaryModelId] || [
+      'openrouter/google/gemma-4-26b-a4b-it:free',
+      'openrouter/cohere/north-mini-code:free',
+      'openrouter/anthropic/claude-3-haiku:free',
+      'openrouter/openai/gpt-oss-20b:free'
     ];
   }
 }

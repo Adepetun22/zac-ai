@@ -8,6 +8,7 @@ import { enterLiveblocksRoom } from '../config/liveblocks';
 export const useLiveblocks = (roomId, currentUser = null) => {
   const [roomData, setRoomData] = useState({ room: null, users: [], others: [], cursor: null, error: null });
   const mountedRef = useRef(true);
+  const lastOthersUpdateRef = useRef(0); // Track last update time to prevent excessive updates
 
   // Normalize the "others" payload into a plain array regardless of shape
   const toOthersArray = (others) => {
@@ -34,6 +35,13 @@ export const useLiveblocks = (roomId, currentUser = null) => {
 
         // Subscribe to other users in the room
         const unsubscribeOthers = liveblocksRoom.subscribe('others', (others) => {
+          // Debounce updates to prevent excessive renders
+          const now = Date.now();
+          if (now - lastOthersUpdateRef.current < 100) { // 100ms debounce
+            return;
+          }
+          lastOthersUpdateRef.current = now;
+
           if (mountedRef.current) {
             const othersArray = toOthersArray(others);
             setRoomData(prev => ({

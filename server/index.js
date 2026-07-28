@@ -195,7 +195,7 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
 // ── Main AI endpoint ──────────────────────────────────────
 app.post('/api/ai', async (req, res) => {
   try {
-    const { prompt, modelId = 'openrouter/meta-llama/llama-3.1-70b-instruct:free', type = 'text' } = req.body
+    const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text' } = req.body
     const provider = resolveProvider(modelId)
     console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type}`)
 

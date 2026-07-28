@@ -11,10 +11,11 @@ import supabaseService from '../../services/supabaseService'
 import useAuthStore from '../../store/authStore'
 import AIService from '../../services/aiService' // Import the AI service
 
+// Change the default model to gemma since it seems to be more reliable based on the logs
 const AI_MODELS = [
+  { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
-  { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (Free)', provider: 'OpenRouter' },
   { id: 'huggingface/free-image', name: 'Free Image Gen (HF)', provider: 'HuggingFace', isImage: true },
 ]
@@ -233,7 +234,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('openrouter/openai/gpt-oss-20b:free')
+  const [selectedModel, setSelectedModel] = useState('openrouter/google/gemma-4-26b-a4b-it:free')
   const bottomRef = useRef(null)
 
   // Check backend status on mount

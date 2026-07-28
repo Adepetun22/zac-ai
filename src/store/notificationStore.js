@@ -4,9 +4,21 @@ const useNotificationStore = create((set, get) => ({
   notifications: [],
   unreadCount: 0,
   
-  // Add a new notification
+  // Add a new notification with rate limiting
   addNotification: (notification) => {
     const id = Date.now() + Math.random(); // Generate unique ID
+    
+    // Rate limiting: Prevent duplicate notifications within a short timeframe
+    const existingNotification = get().notifications.find(n => 
+      n.message === notification.message && 
+      Date.now() - new Date(n.timestamp).getTime() < 2000 // 2 seconds
+    );
+    
+    if (existingNotification) {
+      // Skip adding if duplicate notification occurred recently
+      return;
+    }
+    
     const newNotification = {
       id,
       timestamp: new Date().toISOString(),
@@ -16,9 +28,11 @@ const useNotificationStore = create((set, get) => ({
     
     set(state => {
       const updatedNotifications = [newNotification, ...state.notifications];
-      const unreadCount = updatedNotifications.filter(n => !n.read).length;
+      // Limit total notifications to prevent memory issues
+      const limitedNotifications = updatedNotifications.slice(0, 50); // Keep only latest 50
+      const unreadCount = limitedNotifications.filter(n => !n.read).length;
       return {
-        notifications: updatedNotifications,
+        notifications: limitedNotifications,
         unreadCount
       };
     });
@@ -63,12 +77,22 @@ const useNotificationStore = create((set, get) => ({
     set({ notifications: [], unreadCount: 0 });
   },
   
-  // Add system notification for user joining/leaving collaboration
+  // Add system notification for user joining/leaving collaboration with rate limiting
   addUserNotification: (userName, action) => {
     const message = action === 'joined' 
       ? `${userName} joined the collaboration`
       : `${userName} left the collaboration`;
       
+    // Check if the same user join/leave action happened recently to prevent spam
+    const recentNotification = get().notifications.find(n => 
+      n.message === message && 
+      Date.now() - new Date(n.timestamp).getTime() < 5000 // 5 seconds
+    );
+    
+    if (recentNotification) {
+      return; // Skip if same notification occurred within 5 seconds
+    }
+    
     get().addNotification({
       type: 'collaboration',
       title: 'Collaboration Update',
