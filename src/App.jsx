@@ -90,7 +90,7 @@ const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebar
         liveblocksStatus={collaborationStatus}
       />
 
-      <div className="flex-1 flex flex-col transition-all duration-300">
+      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
         <HeaderWithLocation 
           collaborationStatus={collaborationStatus}
           sidebarCollapsed={sidebarCollapsed}
@@ -98,7 +98,7 @@ const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebar
           handleCollaborateClick={handleCollaborateClick}
         />
 
-        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto min-w-0">
           <Routes>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/ai-models" element={<AIModelsPage />} />

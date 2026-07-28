@@ -317,7 +317,7 @@ export default function AIModelsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div>
           {/* Mobile card view */}
           <div className="min-750:hidden p-3 md:p-4 space-y-3">
             {uniqueFiltered.length > 0 ? uniqueFiltered.map((model) => (
@@ -340,7 +340,7 @@ export default function AIModelsPage() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="grid grid-cols-3 max-360:grid-cols-2 gap-3 text-center">
                   <div className="p-2 bg-white dark:bg-[var(--color-bg-surface)] rounded-lg">
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Requests</p>
                     <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.api_requests || 0}</p>
@@ -367,7 +367,7 @@ export default function AIModelsPage() {
           </div>
 
           {/* Desktop table view */}
-          <div className="hidden min-750:block overflow-x-auto -mx-3 md:-mx-4">
+          <div className="hidden min-750:block overflow-x-auto">
             <div className="px-3 md:px-4">
               <table className="w-full">
                 <thead>
@@ -378,21 +378,21 @@ export default function AIModelsPage() {
                     <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Requests</th>
                     <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Latency</th>
                     <th className="text-left px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Cost</th>
-                    <th className="text-right px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                    <th className="text-right px-4 md:px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-[var(--color-border-subtle)]">
                   {uniqueFiltered.length > 0 ? uniqueFiltered.map((model) => (
                     <tr key={model.id} className="hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] transition-colors">
                       <td className="px-4 md:px-6 py-3 md:py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-[var(--color-brand-50)] flex items-center justify-center shrink-0">
                             <span className="text-xs font-bold text-indigo-600 dark:text-[var(--color-brand-500)]">AI</span>
                           </div>
-                          <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{model.name}</span>
+                          <span className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] truncate">{model.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)]">{model.provider}</td>
+                      <td className="px-4 md:px-6 py-3 md:py-4 text-sm text-slate-600 dark:text-[var(--color-text-secondary)] truncate">{model.provider}</td>
                       <td className="px-4 md:px-6 py-3 md:py-4">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           model.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
