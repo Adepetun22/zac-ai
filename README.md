@@ -8,6 +8,8 @@ Zac-AI Dashboard is a cutting-edge platform that combines AI-powered data visual
 
 The platform is designed for AI engineers, data analysts, product teams, and developers who need a unified interface for managing multiple AI models and collaborating on AI-generated insights and visualizations.
 
+<img width="1915" height="912" alt="Screenshot 2026-07-31 190402" src="https://github.com/user-attachments/assets/f2ffd887-5fed-47d5-b5e7-21b4d3329141" />
+
 ## Tech Stack
 
 ### Frontend
