@@ -3,6 +3,7 @@ import { Search, Bell, ChevronDown, Menu, LayoutDashboard, Settings, LogOut, Use
 import { searchIndex } from '../data/searchIndex'
 import useNotificationStore from '../store/notificationStore'
 import useAuthStore from '../store/authStore'
+import useCollaborationStore from '../store/collaborationStore'
 
 const TYPE_COLORS = {
   Page: 'bg-indigo-50 text-indigo-600',
@@ -11,16 +12,19 @@ const TYPE_COLORS = {
   Setting: 'bg-slate-100 text-slate-600',
 }
 
-export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatus = null, onCollaborateClick = null }) {
+export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatus = null, onCollaborateClick = null, connectedUsers = [] }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [usersOpen, setUsersOpen] = useState(false)
   const ref = useRef(null)
   const profileRef = useRef(null)
   const notificationsRef = useRef(null)
+  const usersRef = useRef(null)
 
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification } = useNotificationStore()
+  const { isHost, disconnectUser } = useCollaborationStore()
 
   const results = query.trim().length > 0
     ? searchIndex.filter(item =>
@@ -36,6 +40,7 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
       if (!ref.current?.contains(e.target)) setOpen(false)
       if (!profileRef.current?.contains(e.target)) setProfileOpen(false)
       if (!notificationsRef.current?.contains(e.target)) setNotificationsOpen(false)
+      if (!usersRef.current?.contains(e.target)) setUsersOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -46,6 +51,20 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
     setQuery('')
     setOpen(false)
   }
+
+  // Close dropdowns when pressing Escape
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setProfileOpen(false)
+        setNotificationsOpen(false)
+        setUsersOpen(false)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   const formatDate = (dateString) => {
     const date = new Date(dateString)
@@ -114,24 +133,109 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
       </div>
 
       <div className="flex items-center gap-4">
-        {/* Collaboration button */}
+        {/* Collaboration / Connected users button */}
         {onCollaborateClick && (
-          <button 
-            onClick={onCollaborateClick}
-            className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer flex items-center"
-            title="Start Collaboration"
-          >
-            <Users className="w-5 h-5" />
-            {liveblocksStatus && liveblocksStatus.otherUserCount > 0 && (  // Only show when other users are present
-              <span 
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white ${
-                  liveblocksStatus.isConnected ? 'bg-green-500' : 'bg-yellow-500'
-                }`}
-              >
-                {liveblocksStatus.otherUserCount}  {/* Show count of OTHER users */}
-              </span>
+          <div ref={usersRef} className="relative">
+            <button
+              onClick={() => setUsersOpen(v => !v)}
+              className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer flex items-center"
+              title="Connected users"
+            >
+              <Users className="w-5 h-5" />
+              {liveblocksStatus && liveblocksStatus.otherUserCount > 0 && (
+                <span 
+                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white ${
+                    liveblocksStatus.isConnected ? 'bg-green-500' : 'bg-yellow-500'
+                  }`}
+                >
+                  {liveblocksStatus.otherUserCount}
+                </span>
+              )}
+            </button>
+
+            {usersOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-[var(--color-bg-surface)] border border-slate-200 dark:border-[var(--color-border-subtle)] rounded-xl shadow-lg z-50 overflow-hidden">
+                <div className="p-3 border-b border-slate-200 dark:border-[var(--color-border-subtle)]">
+                  <h3 className="font-semibold text-slate-800 dark:text-[var(--color-text-primary)]">Connected Users</h3>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto">
+                  {connectedUsers.filter(u => {
+                    const presenceName = u.presence?.name;
+                    const name = presenceName || `User ${u.connectionId}`;
+                    const currentName = user?.name || user?.email;
+                    const currentUserId = user?.id;
+
+                    // Always exclude the current user's own connections
+                    if (u.presence?.userId && currentUserId && u.presence.userId === currentUserId) return false;
+                    // Exclude anonymous connections without a real name
+                    if (!presenceName) return false;
+                    // Exclude if name matches current user
+                    if (name === currentName) return false;
+                    return true;
+                  }).length > 0 ? (
+                    <ul>
+                      {connectedUsers.filter(u => {
+                        const presenceName = u.presence?.name;
+                        const name = presenceName || `User ${u.connectionId}`;
+                        const currentName = user?.name || user?.email;
+                        const currentUserId = user?.id;
+
+                        if (u.presence?.userId && currentUserId && u.presence.userId === currentUserId) return false;
+                        if (!presenceName) return false;
+                        if (name === currentName) return false;
+                        return true;
+                      }).map((u) => {
+                        const name = u.presence?.name || `User ${u.connectionId}`;
+                        const targetUserId = u.presence?.userId;
+                        return (
+                          <li key={u.connectionId} className="px-4 py-2.5 border-b border-slate-100 dark:border-[var(--color-border-subtle)] last:border-b-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-[var(--color-brand-50)] flex items-center justify-center shrink-0">
+                                  <span className="text-xs font-medium text-indigo-700 dark:text-[var(--color-brand-500)]">
+                                    {name.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] truncate">{name}</p>
+                                  <p className="text-xs text-slate-500 truncate">Online</p>
+                                </div>
+                              </div>
+                              {isHost && targetUserId && (
+                                <button
+                                  onClick={() => { disconnectUser(targetUserId); setUsersOpen(false) }}
+                                  className="p-1.5 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer shrink-0"
+                                  title="Disconnect user"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <div className="p-6 text-center">
+                      <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-500">No other users connected</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 dark:border-[var(--color-border-subtle)] p-2">
+                  <button
+                    onClick={() => { onCollaborateClick(); setUsersOpen(false) }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-700 dark:text-[var(--color-text-primary)] hover:bg-slate-50 dark:hover:bg-[var(--color-bg-canvas)] rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Users className="w-4 h-4 text-slate-400" />
+                    Go to collaboration
+                  </button>
+                </div>
+              </div>
             )}
-          </button>
+          </div>
         )}
         
         {/* Notifications dropdown */}
@@ -175,17 +279,17 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">
-                                {notification.title || notification.message.split(' ')[0]}
+                                {notification.title || (notification.message ? notification.message.split(' ')[0] : 'Notification')}
                               </p>
                               {!notification.read && (
                                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
                               )}
                             </div>
                             <p className="text-sm text-slate-600 dark:text-[var(--color-text-secondary)] mt-1">
-                              {notification.message}
+                              {notification.message || ''}
                             </p>
                             <p className="text-xs text-slate-400 dark:text-[var(--color-text-muted)] mt-1">
-                              {formatDate(notification.timestamp)}
+                              {notification.timestamp ? formatDate(notification.timestamp) : ''}
                             </p>
                           </div>
                           <button 

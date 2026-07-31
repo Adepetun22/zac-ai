@@ -41,6 +41,6 @@ export const enterLiveblocksRoom = (roomId) => {
   }
 
   return liveblocksClient.enterRoom(roomId, {
-    initialPresence: () => ({ cursor: null, name: "", selection: [] }),
+    initialPresence: () => ({ cursor: null, name: "", userId: null, selection: [] }),
   });
 };

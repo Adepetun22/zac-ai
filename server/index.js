@@ -161,7 +161,33 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
   }
 
   const res = await axios.post(url, requestBody, { headers: { 'Content-Type': 'application/json' } })
-  const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated'
+  const data = res.data || {}
+  let text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    || data.message
+    || data.output?.candidates?.[0]?.content?.parts?.[0]?.text
+    || 'No response generated'
+
+  if (typeof text === 'string') {
+    const trimmed = text.trim()
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          const preferredKeys = ['message', 'text', 'response', 'content', 'reply', 'answer', 'output']
+          for (const key of preferredKeys) {
+            if (parsed[key] && typeof parsed[key] === 'string') {
+              text = parsed[key]
+              break
+            }
+          }
+          if (text === trimmed) {
+            const firstString = Object.values(parsed).find(v => typeof v === 'string')
+            if (firstString) text = firstString
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
 
   if (type === 'structured') {
     try {

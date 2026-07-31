@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
@@ -9,6 +10,8 @@ import {
 import { supabase } from '../../config/supabase'
 import supabaseService from '../../services/supabaseService'
 import useAuthStore from '../../store/authStore'
+import useCollaborationStore from '../../store/collaborationStore'
+import { useNotification } from '../../components/useNotification'
 import AIService from '../../services/aiService' // Import the AI service
 
 // Change the default model to gemma since it seems to be more reliable based on the logs
@@ -381,7 +384,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder="e.g. Show Q3 revenue..."
+            placeholder="Type here"
             className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-[var(--color-brand-500)] transition-all"
             style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
           />
@@ -408,8 +411,8 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
   const inviteUrl = inviteCode ? `zac://collab/join/${inviteCode}` : ''
 
   const copyToClipboard = () => {
-    if (inviteUrl) {
-      navigator.clipboard.writeText(inviteUrl)
+    if (inviteCode) {
+      navigator.clipboard.writeText(inviteCode)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
@@ -459,18 +462,11 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
                   onClick={copyToClipboard}
                   className="p-2.5 rounded-lg border transition-colors cursor-pointer"
                   style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}
-                  title="Copy invite link"
+                  title="Copy invite code"
                 >
                   {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" style={{ color: 'var(--color-text-secondary)' }} />}
                 </button>
               </div>
-              {inviteUrl && (
-                <div className="mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-                  style={{ backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-muted)' }}>
-                  <Link className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">{inviteUrl}</span>
-                </div>
-              )}
             </div>
           )}
 
@@ -509,6 +505,81 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+function ModelExplainerModal({ onClose }) {
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60" />
+      <div
+        className="relative w-full max-w-lg rounded-xl border shadow-2xl overflow-hidden"
+        style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border-subtle)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+              <Bot className="w-4 h-4 text-white" />
+            </div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Models Overview</h3>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">
+            <X className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+          <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+            Choose the right model for your task. Each model has different strengths:
+          </p>
+
+          <div className="space-y-3">
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Gemini 2.0 Flash (Free)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Best for charts and structured data. Fast, reliable JSON output for revenue trends, distributions, and tables.</p>
+            </div>
+
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Gemma 4 26B A4B (Free)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>General purpose open-source model. Good for everyday chat and simple text tasks.</p>
+            </div>
+
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>GPT-OSS 20B (Free)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Open-source GPT alternative. Reliable for general conversation and reasoning tasks.</p>
+            </div>
+
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>North Mini Code (Free)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Optimized for code generation and technical questions.</p>
+            </div>
+
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Laguna S 2.1 (Free)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Balanced model for general chat and light reasoning.</p>
+            </div>
+
+            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Free Image Gen (HF)</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Generates images from text prompts. Use for visual content creation.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-end shrink-0" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-white text-sm font-medium transition-opacity hover:opacity-90 cursor-pointer"
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function uniqueWidgets(list) {
   const seen = new Set()
   return list.filter(w => {
@@ -525,7 +596,11 @@ export default function CollaborationPage() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteCode, setInviteCode] = useState('')
   const [sessionId, setSessionId] = useState(null)
+  const [showExplainer, setShowExplainer] = useState(false)
+  const [isHost, setIsHost] = useState(false)
   const { user } = useAuthStore();
+  const { addNotification } = useNotification();
+  const { setSession, setDisconnectUser, clearSession } = useCollaborationStore();
   const [currentUser] = useState(() => ({
     id: 'user-' + Math.random().toString(36).substring(2, 8),
     name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
@@ -566,13 +641,22 @@ export default function CollaborationPage() {
         const sid = await supabaseService.ensureUserSession(user.id);
         if (!active) return;
         setSessionId(sid);
+        setSession(sid);
       } catch (error) {
         console.warn('Could not ensure collaboration session:', error.message);
       }
     })();
 
     return () => { active = false; };
-  }, [user?.id, sessionId]);
+  }, [user?.id, sessionId, setSession]);
+
+  // Show explainer modal for first-time users
+  useEffect(() => {
+    const seen = localStorage.getItem('zac-collab-explainer-seen')
+    if (!seen) {
+      setShowExplainer(true)
+    }
+  }, []);
 
   // Load widgets from Supabase whenever the session changes
   useEffect(() => {
@@ -611,6 +695,42 @@ export default function CollaborationPage() {
       }
     })();
   }, [sessionId, loadLocalWidgets]);
+
+  // Check if current user is the host of the session
+  useEffect(() => {
+    if (!sessionId || !user?.id || !supabase) return;
+
+    let active = true;
+    (async () => {
+      try {
+        const session = await supabaseService.getSession(sessionId);
+        if (!active) return;
+        const host = session?.created_by === user.id;
+        setIsHost(host);
+        setSession(sessionId, host);
+      } catch (error) {
+        console.warn('Could not check session host:', error.message);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [sessionId, user?.id, setSession]);
+
+  const disconnectUser = useCallback(async (targetUserId) => {
+    if (!sessionId || !supabase) return;
+    try {
+      await supabaseService.removeParticipant(sessionId, targetUserId);
+      addNotification('User disconnected from session', 'success');
+    } catch (error) {
+      console.warn('Could not disconnect user:', error.message);
+      addNotification('Could not disconnect user', 'error');
+    }
+  }, [sessionId, addNotification]);
+
+  // Update collaboration store when disconnect handler changes
+  useEffect(() => {
+    setDisconnectUser(disconnectUser);
+  }, [disconnectUser, setDisconnectUser]);
 
   // Subscribe to real-time widget changes from Supabase
   useEffect(() => {
@@ -839,6 +959,13 @@ export default function CollaborationPage() {
     setInviteDialogOpen(true)
   }
 
+  const dismissExplainer = () => {
+    try {
+      localStorage.setItem('zac-collab-explainer-seen', 'true')
+    } catch { /* ignore storage errors */ }
+    setShowExplainer(false)
+  }
+
   const handleJoinSession = (code) => {
     const session = extractSessionId(code)
     if (!session) {
@@ -848,6 +975,7 @@ export default function CollaborationPage() {
     
     if (!supabase || !isUUID(session)) {
       setSessionId(session)
+      setSession(session)
       setInviteDialogOpen(false)
       return
     }
@@ -868,11 +996,13 @@ export default function CollaborationPage() {
       })
       .then((resolvedId) => {
         setSessionId(resolvedId)
+        setSession(resolvedId)
         setInviteDialogOpen(false)
       })
       .catch((error) => {
         console.warn('Could not join session via Supabase, using local mode:', error.message)
         setSessionId(session)
+        setSession(session)
         setInviteDialogOpen(false)
       })
   }
@@ -982,6 +1112,11 @@ export default function CollaborationPage() {
           onClose={() => { setInviteDialogOpen(false); setInviteCode('') }}
           onJoin={handleJoinSession}
         />
+      )}
+
+      {/* Model Explainer Modal - first time only */}
+      {showExplainer && (
+        <ModelExplainerModal onClose={dismissExplainer} />
       )}
     </div>
   )

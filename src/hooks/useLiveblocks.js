@@ -30,7 +30,7 @@ export const useLiveblocks = (roomId, currentUser = null) => {
 
         // Publish our identity so other users see a real name instead of "User <id>"
         if (currentUser?.name) {
-          liveblocksRoom.updatePresence({ name: currentUser.name });
+          liveblocksRoom.updatePresence({ name: currentUser.name, userId: currentUser.id });
         }
 
         // Subscribe to other users in the room
@@ -49,6 +49,7 @@ export const useLiveblocks = (roomId, currentUser = null) => {
               others: othersArray,
               users: othersArray.map(user => ({
                 id: user.connectionId,
+                userId: user.presence.userId,
                 name: user.presence.name || `User ${user.connectionId}`,
                 cursor: user.presence.cursor,
                 selection: user.presence.selection,

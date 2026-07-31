@@ -209,9 +209,43 @@ class SupabaseService {
 
     return crypto.randomUUID();
   }
+
+  // Get session details including creator
+  async getSession(sessionId) {
+    const { data, error } = await this.client
+      .from('collaboration_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  // Get all participants in a session
+  async getSessionParticipants(sessionId) {
+    const { data, error } = await this.client
+      .from('session_participants')
+      .select('user_id')
+      .eq('session_id', sessionId);
+
+    if (error) throw error;
+    return (data || []).map(row => row.user_id);
+  }
+
+  // Remove a participant from a session
+  async removeParticipant(sessionId, userId) {
+    const { error } = await this.client
+      .from('session_participants')
+      .delete()
+      .eq('session_id', sessionId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  }
   /**
-   * AI Models operations
-   */
+    * AI Models operations
+    */
 
   // Get all AI models for a user
   async getAiModels(userId) {

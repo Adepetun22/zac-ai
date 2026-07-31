@@ -12,6 +12,7 @@ import SettingsPage from './features/settings/SettingsPage';
 import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
 import useAuthStore from './store/authStore';
+import useThemeStore from './store/themeStore';
 import { liveblocksClient, publicApiKey } from './config/liveblocks';
 import { resolveUsers, resolveRooms } from './liveblocks.config';
 import { useLiveblocks } from './hooks/useLiveblocks';
@@ -37,7 +38,7 @@ const PublicRoute = ({ children, isLoading, isAuthenticated }) => {
 };
 
 // Header component with location awareness using window.location
-const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick }) => {
+const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick, connectedUsers = [] }) => {
   // Check if we're on the collaboration page using window.location
   const isOnCollaborationPage = window.location.hash.includes('/collaboration');
   
@@ -76,12 +77,13 @@ const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarC
       }}
       liveblocksStatus={currentCollaborationStatus}
       onCollaborateClick={handleCollaborateClick}
+      connectedUsers={connectedUsers}
     />
   );
 };
 
 // Main authenticated layout component
-const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick }) => {
+const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick, connectedUsers = [] }) => {
   return (
     <div className="flex h-screen bg-slate-50">
       <Sidebar
@@ -96,6 +98,7 @@ const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebar
           sidebarCollapsed={sidebarCollapsed}
           setSidebarCollapsed={setSidebarCollapsed}
           handleCollaborateClick={handleCollaborateClick}
+          connectedUsers={connectedUsers}
         />
 
         <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto min-w-0">
@@ -117,13 +120,19 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const { user, isAuthenticated, isLoading, initAuth } = useAuthStore();
   const { addUserNotification } = useNotificationStore();
+  const { initTheme } = useThemeStore();
+
+  // Initialize persisted theme/accent on app load
+  useEffect(() => {
+    initTheme();
+  }, [initTheme]);
 
   // Use Liveblocks for collaboration status - use a default room name that's generic
   const {
     others,
     otherUserCount, // Get otherUserCount directly from the hook
     isLiveblocksEnabled,
-  } = useLiveblocks('dashboard-app', user); // Changed from 'app-main-room' to a more generic name
+  } = useLiveblocks(`dashboard-app-${user?.id || 'anonymous'}`, user); // Per-user room to avoid global stranger notifications
 
   // Get collaboration status for UI indicators
   const collaborationStatus = {
@@ -211,6 +220,7 @@ function App() {
                 handleCollaborateClick={useCallback(() => {
                   window.location.hash = '#/collaboration';
                 }, [])}
+                connectedUsers={others}
               />
             </ProtectedRoute>
           }

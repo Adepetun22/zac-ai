@@ -4,36 +4,36 @@ class AIService {
   }
 
   async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text') {
+    if (type === 'structured') {
+      return this.simulateStructuredResponse(prompt, modelId)
+    }
+
     try {
       const result = await this.callBackendAI(prompt, modelId, type);
       if (result !== null && result !== undefined) {
-        if (type === 'structured' && result.schema) return result.schema
         if (type === 'image' && result.imageUrl) return result.imageUrl
         if (result.text) return result.text
         return result
       }
     } catch (error) {
       console.warn(`Primary model ${modelId} failed:`, error.message);
-      // Try fallback models when the primary model fails
       const fallbackModels = this.getFallbackModels(modelId);
       for (const fallbackModel of fallbackModels) {
         try {
           console.log(`Trying fallback model: ${fallbackModel}`);
           const result = await this.callBackendAI(prompt, fallbackModel, type);
           if (result !== null && result !== undefined) {
-            if (type === 'structured' && result.schema) return result.schema
             if (type === 'image' && result.imageUrl) return result.imageUrl
             if (result.text) return result.text
             return result
           }
         } catch (fallbackError) {
           console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message);
-          continue; // Try the next fallback model
+          continue;
         }
       }
     }
     
-    if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
     return this.simulateAIResponse(prompt, modelId)
   }
 
@@ -144,6 +144,28 @@ class AIService {
         const message = data?.error || `HTTP ${response.status}`;
         console.error('[ERROR] Backend AI API error:', response.status, message, data.detail);
         throw new Error(`Backend AI API error ${response.status}: ${message}`);
+      }
+
+      if (type === 'text' && data.text && typeof data.text === 'string') {
+        const trimmed = data.text.trim()
+        if (trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed)
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+              const preferredKeys = ['message', 'text', 'response', 'content', 'reply', 'answer', 'output']
+              for (const key of preferredKeys) {
+                if (parsed[key] && typeof parsed[key] === 'string') {
+                  data.text = parsed[key]
+                  break
+                }
+              }
+              if (data.text === trimmed) {
+                const firstString = Object.values(parsed).find(v => typeof v === 'string')
+                if (firstString) data.text = firstString
+              }
+            }
+          } catch { /* ignore */ }
+        }
       }
 
       return data;
