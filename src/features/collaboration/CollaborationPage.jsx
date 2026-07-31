@@ -13,7 +13,7 @@ import AIService from '../../services/aiService' // Import the AI service
 
 // Change the default model to gemma since it seems to be more reliable based on the logs
 const AI_MODELS = [
-  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (Free)', provider: 'Google' },
+  { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash (Free)', provider: 'Google' },
   { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
@@ -237,7 +237,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('google/gemini-2.5-flash')
+  const [selectedModel, setSelectedModel] = useState('google/gemini-2.0-flash')
   const bottomRef = useRef(null)
 
   // Check backend status on mount

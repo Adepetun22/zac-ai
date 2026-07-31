@@ -110,7 +110,7 @@ class AIService {
       }
     }
     return {
-      type: 'bar', title: prompt.slice(0, 40), model: modelId,
+      type: 'bar', title: prompt.slice(0, 40), model: modelId || 'google/gemini-2.0-flash',
       data: [
         { label: 'A', value: Math.floor(Math.random() * 80 + 20) },
         { label: 'B', value: Math.floor(Math.random() * 80 + 20) },
@@ -193,38 +193,37 @@ class AIService {
   getFallbackModels(primaryModelId) {
     // Define fallback chains for different models
     const fallbackChains = {
-      'google/gemini-2.5-flash': [
-        'google/gemini-2.5-pro',
-        'openrouter/openai/gpt-4o',
-        'openrouter/anthropic/claude-3.5-sonnet'
+      'google/gemini-2.0-flash': [
+        'google/gemini-2.0-pro',
+        'openrouter/google/gemma-4-26b-a4b-it:free',
+        'openrouter/openai/gpt-oss-20b:free'
       ],
       'openrouter/openai/gpt-oss-20b:free': [
         'openrouter/google/gemma-4-26b-a4b-it:free',
         'openrouter/cohere/north-mini-code:free',
-        'openrouter/anthropic/claude-3-haiku:free'
-      ],
-      'openrouter/poolside/laguna-s-2.1:free': [
-        'openrouter/google/gemma-4-26b-a4b-it:free',
-        'openrouter/cohere/north-mini-code:free',
-        'openrouter/openai/gpt-oss-20b:free'
+        'openrouter/poolside/laguna-s-2.1:free'
       ],
       'openrouter/cohere/north-mini-code:free': [
         'openrouter/google/gemma-4-26b-a4b-it:free',
         'openrouter/openai/gpt-oss-20b:free',
-        'openrouter/anthropic/claude-3-haiku:free'
+        'openrouter/poolside/laguna-s-2.1:free'
+      ],
+      'openrouter/poolside/laguna-s-2.1:free': [
+        'openrouter/google/gemma-4-26b-a4b-it:free',
+        'openrouter/openai/gpt-oss-20b:free',
+        'openrouter/cohere/north-mini-code:free'
       ],
       'openrouter/google/gemma-4-26b-a4b-it:free': [
-        'openrouter/cohere/north-mini-code:free',
         'openrouter/openai/gpt-oss-20b:free',
-        'openrouter/anthropic/claude-3-haiku:free'
+        'openrouter/cohere/north-mini-code:free',
+        'openrouter/poolside/laguna-s-2.1:free'
       ]
     };
     
     // Return the fallback chain for the given model, or a general fallback list
     return fallbackChains[primaryModelId] || [
+      'google/gemini-2.0-flash',
       'openrouter/google/gemma-4-26b-a4b-it:free',
-      'openrouter/cohere/north-mini-code:free',
-      'openrouter/anthropic/claude-3-haiku:free',
       'openrouter/openai/gpt-oss-20b:free'
     ];
   }

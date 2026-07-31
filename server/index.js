@@ -137,11 +137,13 @@ async function callAnthropic(prompt, modelId, apiKey, type) {
 
 // ── Google Gemini ─────────────────────────────────────────
 async function callGoogleGemini(prompt, modelId, apiKey, type) {
-  let modelName = 'gemini-2.5-flash'
-  if (modelId.includes('gemini-pro') && !modelId.includes('flash')) modelName = 'gemini-2.5-pro'
+  let modelName = 'gemini-2.0-flash'
+  if (modelId.includes('gemini-2.5-pro') || (modelId.includes('gemini-pro') && !modelId.includes('flash'))) modelName = 'gemini-2.5-pro'
   else if (modelId.includes('gemini-2.5-flash-image')) modelName = 'gemini-2.5-flash-image'
   else if (modelId.includes('gemini-2.5-flash')) modelName = 'gemini-2.5-flash'
-  else if (modelId.includes('gemini-2.5-pro')) modelName = 'gemini-2.5-pro'
+  else if (modelId.includes('gemini-2.0-flash')) modelName = 'gemini-2.0-flash'
+  else if (modelId.includes('gemini-2.0-pro')) modelName = 'gemini-2.0-pro'
+  else if (modelId.includes('gemini-pro')) modelName = 'gemini-2.5-pro'
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`
   const requestBody = {
