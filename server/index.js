@@ -110,7 +110,7 @@ async function callAnthropic(prompt, modelId, apiKey, type) {
     model,
     max_tokens: 1024,
     messages: [{ role: 'user', content: prompt }],
-    ...(type === 'structured' ? { response_format: { type: 'json_object' } } : {}),
+    ...(type === 'structured' ? { system: 'Return ONLY a valid JSON object with keys: type, title, data, model. No markdown, no explanation.' } : {}),
   }
 
   const res = await axios.post(url, body, {
@@ -148,6 +148,10 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
   if (type === 'structured') {
     requestBody.systemInstruction = {
       parts: [{ text: 'Return ONLY a valid JSON object with keys: type, title, data, model. No markdown.' }]
+    }
+    requestBody.generationConfig = {
+      ...requestBody.generationConfig,
+      responseMimeType: 'application/json'
     }
   }
 

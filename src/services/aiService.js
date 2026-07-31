@@ -193,6 +193,11 @@ class AIService {
   getFallbackModels(primaryModelId) {
     // Define fallback chains for different models
     const fallbackChains = {
+      'google/gemini-2.5-flash': [
+        'google/gemini-2.5-pro',
+        'openrouter/openai/gpt-4o',
+        'openrouter/anthropic/claude-3.5-sonnet'
+      ],
       'openrouter/openai/gpt-oss-20b:free': [
         'openrouter/google/gemma-4-26b-a4b-it:free',
         'openrouter/cohere/north-mini-code:free',

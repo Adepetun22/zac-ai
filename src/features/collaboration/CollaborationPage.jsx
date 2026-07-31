@@ -13,6 +13,7 @@ import AIService from '../../services/aiService' // Import the AI service
 
 // Change the default model to gemma since it seems to be more reliable based on the logs
 const AI_MODELS = [
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (Free)', provider: 'Google' },
   { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
@@ -205,8 +206,10 @@ function Widget({ widget, onMove, onRemove }) {
   return (
     <div
       onMouseDown={onMouseDown}
-      className="absolute bg-white border border-slate-200 rounded-xl shadow-sm select-none"
-      style={{ left: widget.x, top: widget.y, width: 300 }}
+      className="absolute bg-white border border-slate-200 rounded-xl shadow-sm select-none
+        w-[85vw] max-w-[280px] sm:max-w-[300px] min-w-[200px] min-w-0
+        overflow-hidden"
+      style={{ left: widget.x, top: widget.y }}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-2">
@@ -220,7 +223,7 @@ function Widget({ widget, onMove, onRemove }) {
           </button>
         </div>
       </div>
-      <div className="p-4">
+      <div className="p-4 min-w-0" style={{ width: '100%' }}>
         <WidgetChart schema={widget.schema} />
       </div>
     </div>
@@ -234,7 +237,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('openrouter/google/gemma-4-26b-a4b-it:free')
+  const [selectedModel, setSelectedModel] = useState('google/gemini-2.5-flash')
   const bottomRef = useRef(null)
 
   // Check backend status on mount
@@ -948,8 +951,8 @@ export default function CollaborationPage() {
           </div>
         )}
 
-        {/* Widgets */}
-        {widgets.map(w => (
+        {/* Widgets - only render Image and Chart cards, no text cards */}
+        {uniqueWidgets(widgets).filter(w => w.schema.type !== 'text').map(w => (
           <Widget key={w.id} widget={w} onMove={moveWidget} onRemove={removeWidget} />
         ))}
       </div>
