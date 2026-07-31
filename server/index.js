@@ -79,7 +79,10 @@ async function callOpenAI(prompt, modelId, apiKey, type) {
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 1000,
-    ...(type === 'structured' ? { response_format: { type: 'json_object' } } : {}),
+  }
+  if (type === 'structured') {
+    body.response_format = { type: 'json_object' }
+    body.messages[0].content = prompt + '\n\nReturn ONLY a valid JSON object. No markdown, no explanation.'
   }
 
   const res = await axios.post(url, body, {
@@ -174,8 +177,11 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
 
   const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     model: actualModel,
-    messages: [{ role: 'user', content: prompt }],
-    ...(type === 'structured' ? { response_format: { type: 'json_object' }, temperature: 0.1 } : {}),
+    messages: [
+      { role: 'system', content: 'Return ONLY a valid JSON object. No markdown, no explanation.' },
+      { role: 'user', content: prompt }
+    ],
+    ...(type === 'structured' ? { response_format: { type: 'json_object' }, temperature: 0.1 } : { temperature: 0.7 }),
   }, {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -224,8 +230,19 @@ app.post('/api/ai', async (req, res) => {
 
     res.json(result)
   } catch (error) {
-    console.error('[ERROR] AI API error:', error.message, error.response?.data)
-    res.status(500).json({ error: 'AI provider request failed', detail: error.response?.data || error.message })
+    console.error('[ERROR] AI API error:', error.message)
+    console.error('[ERROR] Full error details:', {
+      message: error.message,
+      code: error.code,
+      config: error.config?.url,
+      response: error.response?.data,
+      status: error.response?.status
+    })
+    res.status(500).json({
+      error: 'AI provider request failed',
+      detail: error.message,
+      providerError: error.response?.data || null
+    })
   }
 })
 
