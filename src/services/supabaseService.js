@@ -265,7 +265,10 @@ class SupabaseService {
       .insert([{
         name: model.name,
         provider: model.provider,
-        status: model.status || 'inactive',
+        model_id: model.model_id || null,
+        api_key: model.api_key || null,
+        endpoint: model.endpoint || null,
+        status: model.status || 'active',
         cost: model.cost ?? 0,
         latency: model.latency ?? 0,
         api_requests: model.api_requests ?? 0,

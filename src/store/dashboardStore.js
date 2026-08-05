@@ -62,15 +62,15 @@ const useDashboardStore = create((set, get) => ({
   transformAnalyticsToRecentActivity: (analytics, aiModels = []) => {
     const activities = []
     const modelMap = {}
-    aiModels.forEach(m => { modelMap[m.id] = m })
+    aiModels.forEach(m => { modelMap[m.id] = m; modelMap[m.name] = m })
     analytics.forEach((record, index) => {
-      const model = modelMap[record.user_id] || { name: 'Unknown Model', provider: 'Unknown' }
+      const model = modelMap[record.model_id] || modelMap[record.model_name] || { name: record.model_name || 'AI Request', provider: 'Unknown' }
       activities.push({
         id: record.id || index,
         model: model.name,
-        prompt: record.metric || 'AI Request',
-        status: 'completed',
-        tokens: Math.round(Number(record.value) || 0),
+        prompt: record.metric || record.model_name || 'AI Request',
+        status: record.status || 'completed',
+        tokens: Math.round(Number(record.value) || record.tokens_processed || 0),
         time: record.created_at ? new Date(record.created_at).toLocaleString() : 'recently',
       })
     })
@@ -252,36 +252,21 @@ const useDashboardStore = create((set, get) => ({
     
     try {
       const analytics = await supabaseService.getAnalytics(userId, startDate, endDate);
-      set({ analytics });
+      set({ analytics: analytics || [] });
     } catch (error) {
       console.error('Error fetching analytics:', error);
-      set({ analyticsError: error.message });
+      set({ analytics: [], analyticsError: error.message });
     }
   },
 
   fetchDashboardData: async (userId) => {
     if (!userId) return
-    const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace('/api', '').replace(/\/$/, '') || ''
-    try {
-      const url = backendUrl
-        ? `${backendUrl}/api/dashboard?userId=${encodeURIComponent(userId)}`
-        : `/api/dashboard?userId=${encodeURIComponent(userId)}`
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`Backend responded with ${response.status}`)
-      const data = await response.json()
-      if (data.metrics) {
-        set({
-          aiModels: data.aiModels || [],
-          analytics: data.analytics || [],
-          metrics: data.metrics,
-        })
-      }
-    } catch (error) {
-      console.warn('Backend dashboard fetch failed, falling back to Supabase:', error.message)
-      get().fetchWidgets(userId)
-      get().fetchAiModels(userId)
-      get().fetchAnalytics(userId)
-    }
+    set({ isLoading: true })
+    await Promise.all([
+      get().fetchAiModels(userId),
+      get().fetchAnalytics(userId),
+    ])
+    set({ isLoading: false })
   },
 
   // Clear error

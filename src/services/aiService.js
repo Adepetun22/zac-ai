@@ -3,37 +3,42 @@ class AIService {
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   }
 
-  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text') {
-    if (type === 'structured') {
-      return this.simulateStructuredResponse(prompt, modelId)
-    }
-
+  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey = null) {
     try {
-      const result = await this.callBackendAI(prompt, modelId, type);
+      const result = await this.callBackendAI(prompt, modelId, type, apiKey);
       if (result !== null && result !== undefined) {
+        // Structured: backend returns { schema: {...} }
+        if (type === 'structured') {
+          if (result.schema && typeof result.schema === 'object') return result.schema
+          if (result.type) return result
+        }
         if (type === 'image' && result.imageUrl) return result.imageUrl
         if (result.text) return result.text
         return result
       }
     } catch (error) {
       console.warn(`Primary model ${modelId} failed:`, error.message);
-      const fallbackModels = this.getFallbackModels(modelId);
-      for (const fallbackModel of fallbackModels) {
-        try {
-          console.log(`Trying fallback model: ${fallbackModel}`);
-          const result = await this.callBackendAI(prompt, fallbackModel, type);
-          if (result !== null && result !== undefined) {
-            if (type === 'image' && result.imageUrl) return result.imageUrl
-            if (result.text) return result.text
-            return result
+      // Only attempt fallbacks for non-structured requests
+      if (type !== 'structured') {
+        const fallbackModels = this.getFallbackModels(modelId);
+        for (const fallbackModel of fallbackModels) {
+          try {
+            const result = await this.callBackendAI(prompt, fallbackModel, type, null);
+            if (result !== null && result !== undefined) {
+              if (type === 'image' && result.imageUrl) return result.imageUrl
+              if (result.text) return result.text
+              return result
+            }
+          } catch (fallbackError) {
+            console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message);
+            continue;
           }
-        } catch (fallbackError) {
-          console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message);
-          continue;
         }
       }
     }
-    
+
+    // Only simulate as last resort
+    if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
     return this.simulateAIResponse(prompt, modelId)
   }
 
@@ -119,22 +124,19 @@ class AIService {
     }
   }
 
-  async callBackendAI(prompt, modelId, type = 'text') {
+  async callBackendAI(prompt, modelId, type = 'text', apiKey = null) {
     try {
       console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
+      const body = { prompt, modelId, type }
+      if (apiKey) body.apiKey = apiKey
       const response = await fetch(
         this.backendUrl ? `${this.backendUrl}/ai` : '/ai',
         {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt,
-          modelId,
-          type
-        })
-      });
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }
+      );
 
       console.log('[DEBUG] Backend response status:', response.status);
       const data = await response.json();

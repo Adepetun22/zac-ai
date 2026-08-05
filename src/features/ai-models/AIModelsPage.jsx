@@ -56,26 +56,59 @@ function ModelRowActions({ model, onRun, onEdit, onDelete }) {
   );
 }
 
+const PROVIDER_MODEL_IDS = {
+  OpenAI: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4', 'openai/gpt-3.5-turbo'],
+  Anthropic: ['anthropic/claude-3-5-sonnet-latest', 'anthropic/claude-3-opus-latest', 'anthropic/claude-3-haiku-20240307', 'anthropic/claude-3-5-haiku-latest'],
+  Google: ['google/gemini-2.0-flash', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro'],
+  OpenRouter: ['openrouter/google/gemma-4-26b-a4b-it:free', 'openrouter/openai/gpt-oss-20b:free', 'openrouter/meta-llama/llama-3.1-70b-instruct:free', 'openrouter/mistralai/mistral-large'],
+  Meta: ['openrouter/meta-llama/llama-3.1-70b-instruct:free', 'openrouter/meta-llama/llama-3.1-8b-instruct:free'],
+  'Mistral AI': ['openrouter/mistralai/mistral-large', 'openrouter/mistralai/mistral-7b-instruct:free'],
+  HuggingFace: ['huggingface/free-image'],
+  Custom: [],
+}
+
+const PROVIDER_KEY_LABELS = {
+  OpenAI: 'OpenAI API Key (sk-...)',
+  Anthropic: 'Anthropic API Key (sk-ant-...)',
+  Google: 'Google AI / Gemini API Key',
+  OpenRouter: 'OpenRouter API Key (sk-or-...)',
+  Meta: 'OpenRouter API Key (routes Meta via OpenRouter)',
+  'Mistral AI': 'OpenRouter API Key (routes Mistral via OpenRouter)',
+  HuggingFace: 'Hugging Face API Key (hf_...)',
+  Custom: 'API Key',
+}
+
 function ModelModal({ model, onClose, onSave }) {
   const [form, setForm] = useState({
     name: model?.name || '',
     provider: model?.provider || 'OpenAI',
-    status: model?.status || 'inactive',
+    model_id: model?.model_id || '',
+    api_key: model?.api_key || '',
+    endpoint: model?.endpoint || '',
+    status: model?.status || 'active',
     cost: model?.cost ?? 0,
     latency: model?.latency ?? 0,
-    api_requests: model?.api_requests ?? 0,
-    tokens_processed: model?.tokens_processed ?? 0,
   });
+  const [showKey, setShowKey] = useState(false);
+
+  const modelIdOptions = PROVIDER_MODEL_IDS[form.provider] || [];
+
+  const handleProviderChange = (provider) => {
+    const options = PROVIDER_MODEL_IDS[provider] || [];
+    setForm(f => ({ ...f, provider, model_id: options[0] || '' }));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave({ ...form, id: model?.id });
   };
 
+  const inputCls = 'w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] shadow-xl w-full max-w-lg p-6">
+      <div className="relative bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">
             {model ? 'Edit Model' : 'Add New Model'}
@@ -86,64 +119,117 @@ function ModelModal({ model, onClose, onSave }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Model Name</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]"
-              required
-            />
-          </div>
-
+          {/* Provider first — drives model_id options and key label */}
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Provider</label>
             <select
               value={form.provider}
-              onChange={(e) => setForm({ ...form, provider: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]"
+              onChange={(e) => handleProviderChange(e.target.value)}
+              className={inputCls}
             >
-              <option>OpenAI</option>
-              <option>Anthropic</option>
-              <option>Google</option>
-              <option>Meta</option>
-              <option>Mistral AI</option>
-              <option>Microsoft</option>
-              <option>Custom</option>
+              {Object.keys(PROVIDER_MODEL_IDS).map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
 
+          {/* Model ID — dropdown of known IDs or free-text for Custom */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Status</label>
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]"
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+            <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">
+              Model ID <span className="text-slate-400 font-normal">(used to route API calls)</span>
+            </label>
+            {modelIdOptions.length > 0 ? (
+              <select
+                value={form.model_id}
+                onChange={(e) => setForm({ ...form, model_id: e.target.value })}
+                className={inputCls}
+                required
+              >
+                <option value="">Select a model ID…</option>
+                {modelIdOptions.map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={form.model_id}
+                onChange={(e) => setForm({ ...form, model_id: e.target.value })}
+                placeholder="e.g. openai/gpt-4o or your-custom-model-id"
+                className={inputCls}
+                required
+              />
+            )}
           </div>
+
+          {/* Display name */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Display Name</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. My GPT-4o"
+              className={inputCls}
+              required
+            />
+          </div>
+
+          {/* API Key */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">
+              {PROVIDER_KEY_LABELS[form.provider] || 'API Key'}
+            </label>
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={form.api_key}
+                onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                placeholder="Paste your API key here"
+                className={inputCls + ' pr-16'}
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey(v => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 cursor-pointer px-1"
+              >
+                {showKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Stored in your account. Used only for your requests.</p>
+          </div>
+
+          {/* Custom endpoint — only shown for Custom provider */}
+          {form.provider === 'Custom' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">API Endpoint URL</label>
+              <input
+                type="url"
+                value={form.endpoint}
+                onChange={(e) => setForm({ ...form, endpoint: e.target.value })}
+                placeholder="https://your-api.example.com/v1/chat/completions"
+                className={inputCls}
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Cost ($/1K)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.cost}
-                onChange={(e) => setForm({ ...form, cost: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]"
-              />
+              <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className={inputCls}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Latency (ms)</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1">Cost ($/1K tokens)</label>
               <input
                 type="number"
-                value={form.latency}
-                onChange={(e) => setForm({ ...form, latency: parseInt(e.target.value) || 0 })}
-                className="w-full px-3 py-2 border border-slate-200 dark:border-[var(--color-border-subtle)] bg-white dark:bg-[var(--color-bg-canvas)] rounded-lg text-sm text-slate-900 dark:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-500)]"
+                step="0.001"
+                min="0"
+                value={form.cost}
+                onChange={(e) => setForm({ ...form, cost: parseFloat(e.target.value) || 0 })}
+                className={inputCls}
               />
             </div>
           </div>

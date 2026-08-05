@@ -327,7 +327,7 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
             className="flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-[var(--color-border-subtle)] cursor-pointer"
           >
             <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-[var(--color-brand-50)] flex items-center justify-center">
-              <span className="text-sm font-medium text-indigo-700 dark:text-[var(--color-brand-500)]">Z</span>
+              <span className="text-sm font-medium text-indigo-700 dark:text-[var(--color-brand-500)]">{(user?.name || user?.email || 'Z').charAt(0).toUpperCase()}</span>
             </div>
             <div className="hidden min-750:block text-left">
               <p className="text-sm font-semibold text-slate-700 dark:text-[var(--color-text-primary)]">{user?.name || user?.email || 'Zac Admin'}</p>

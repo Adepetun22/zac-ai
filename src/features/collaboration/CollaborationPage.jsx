@@ -11,11 +11,12 @@ import { supabase } from '../../config/supabase'
 import supabaseService from '../../services/supabaseService'
 import useAuthStore from '../../store/authStore'
 import useCollaborationStore from '../../store/collaborationStore'
+import useDashboardStore from '../../store/dashboardStore'
 import { useNotification } from '../../components/useNotification'
-import AIService from '../../services/aiService' // Import the AI service
+import AIService from '../../services/aiService'
 
-// Change the default model to gemma since it seems to be more reliable based on the logs
-const AI_MODELS = [
+// Built-in free models always available (no API key needed)
+const FREE_MODELS = [
   { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash (Free)', provider: 'Google' },
   { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
@@ -53,7 +54,7 @@ function getPeerColor(id) {
 const CHART_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
 
 // ─── AI Integration ────────────────────────────────────────────────────────────
-async function processAIRequest(prompt, modelId) {
+async function processAIRequest(prompt, modelId, apiKey = null) {
   try {
     const p = prompt.toLowerCase()
     const isImageModel = modelId.includes('FLUX') || modelId.includes('stable') || modelId.includes('flux') || modelId.includes('pollinations') || modelId.includes('free-image') || modelId.includes('huggingface')
@@ -63,56 +64,32 @@ async function processAIRequest(prompt, modelId) {
     if (isImageModel || isImagePrompt) {
       if (isImageModel) {
         const imageUrl = await AIService.generateImage(prompt, modelId)
-        if (imageUrl) {
-          return {
-            type: 'image',
-            title: prompt.slice(0, 40),
-            model: modelId,
-            imageUrl,
-          }
-        }
+        if (imageUrl) return { type: 'image', title: prompt.slice(0, 40), model: modelId, imageUrl }
       } else {
-        return {
-          type: 'text',
-          title: `Image generation not supported`,
-          model: modelId,
-          content: `The selected model (${modelId}) does not support image generation. Switch to an image-capable model to generate images.`,
-        }
+        return { type: 'text', title: 'Image generation not supported', model: modelId, content: `The selected model (${modelId}) does not support image generation.` }
       }
     }
 
     if (isChartPrompt) {
-      const structured = await AIService.generateResponse(prompt, modelId, 'structured')
-      if (structured && typeof structured === 'object' && (structured.type || structured.content)) {
-        return structured
+      const structured = await AIService.generateResponse(prompt, modelId, 'structured', apiKey)
+      if (structured && typeof structured === 'object' && structured.type) {
+        // Ensure model field is set
+        return { ...structured, model: structured.model || modelId }
       }
     }
 
-    const aiResponse = await AIService.generateResponse(prompt, modelId)
-    if (typeof aiResponse === 'object') return aiResponse
-    return {
-      type: 'text',
-      title: `AI Response: ${prompt.slice(0, 40)}`,
-      model: modelId,
-      content: aiResponse,
+    const aiResponse = await AIService.generateResponse(prompt, modelId, 'text', apiKey)
+    if (typeof aiResponse === 'string') {
+      return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse }
     }
+    if (typeof aiResponse === 'object' && aiResponse !== null) {
+      if (aiResponse.type) return { ...aiResponse, model: aiResponse.model || modelId }
+      if (aiResponse.text) return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse.text }
+    }
+    return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: String(aiResponse) }
   } catch (error) {
     console.error('AI processing error:', error)
-    const isImageRequest = prompt.toLowerCase().includes('image') || prompt.toLowerCase().includes('picture') || prompt.toLowerCase().includes('photo') || prompt.toLowerCase().includes('draw')
-    if (isImageRequest) {
-      return {
-        type: 'text',
-        title: `Image generation unavailable`,
-        model: modelId,
-        content: `Image generation is not supported for ${modelId}. Use a dedicated image-generation model to create images.`,
-      }
-    }
-    return {
-      type: 'text',
-      title: `Error: ${error.message}`,
-      model: modelId,
-      content: `Failed to get a response from ${modelId}. ${error.message}`,
-    }
+    return { type: 'text', title: `Error: ${error.message}`, model: modelId, content: `Failed to get a response from ${modelId}. ${error.message}` }
   }
 }
 
@@ -240,8 +217,17 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('google/gemini-2.0-flash')
+  const [selectedModelId, setSelectedModelId] = useState('google/gemini-2.0-flash')
   const bottomRef = useRef(null)
+
+  // Merge user-configured active models with built-in free models
+  const { aiModels: userModels } = useDashboardStore()
+  const allModels = [
+    ...FREE_MODELS,
+    ...userModels
+      .filter(m => m.status === 'active' && m.model_id && !FREE_MODELS.find(f => f.id === m.model_id))
+      .map(m => ({ id: m.model_id, name: `${m.name} ★`, provider: m.provider, api_key: m.api_key }))
+  ]
 
   // Check backend status on mount
   useEffect(() => {
@@ -251,34 +237,21 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
         const response = await fetch(`${backendUrl}/api/health`);
         const data = await response.json();
         if (!response.ok) {
-          // Backend is reachable but not responding properly
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            text: '⚠️ Backend server is running but may not have API keys configured. Responses will be simulated.' 
-          }]);
+          setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Backend server is running but may not have API keys configured. Responses will be simulated.' }]);
         } else if (data.providers && (!data.providers.google || !data.providers.openrouter)) {
-          // Backend is running but some API keys are missing
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            text: '⚠️ Some API keys are not configured. Using simulated responses as fallback.' 
-          }]);
+          setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Some API keys are not configured. Using simulated responses as fallback.' }]);
         }
       } catch (error) {
         console.warn('Backend status check failed:', error.message);
-        // Backend is not reachable
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          text: '⚠️ Backend server not reachable. Using simulated responses.' 
-        }]);
+        setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Backend server not reachable. Using simulated responses.' }]);
       }
     };
-    
     checkBackendStatus();
   }, []);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const handleSend = async () => {  // Changed to async
+  const handleSend = async () => {
     const text = input.trim()
     if (!text || thinking) return
     setMessages(m => [...m, { role: 'user', text }])
@@ -286,34 +259,20 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
     setThinking(true)
 
     try {
-      // Process the AI request using the new service
-      const schema = await processAIRequest(text, selectedModel)
+      const selectedModel = allModels.find(m => m.id === selectedModelId)
+      const schema = await processAIRequest(text, selectedModelId, selectedModel?.api_key || null)
       onAddWidget(schema)
-      const modelName = AI_MODELS.find(m => m.id === selectedModel)?.name || selectedModel
-      
-      // Add the AI response to messages
+      const modelName = selectedModel?.name || selectedModelId
+
       let aiResponseText = `Added "${schema.title}" to the canvas`
-      
-      if (schema.type === 'text') {
-        aiResponseText = schema.content
-      } else if (schema.type === 'image') {
-        aiResponseText = `Generated image: "${schema.title}" using ${modelName}.`
-      } else {
-        aiResponseText += ` as a ${schema.type} chart using ${modelName}.`
-      }
-      
-      setMessages(m => [...m, {
-        role: 'assistant',
-        text: aiResponseText,
-        schema,
-      }])
+      if (schema.type === 'text') aiResponseText = schema.content
+      else if (schema.type === 'image') aiResponseText = `Generated image: "${schema.title}" using ${modelName}.`
+      else aiResponseText += ` as a ${schema.type} chart using ${modelName}.`
+
+      setMessages(m => [...m, { role: 'assistant', text: aiResponseText, schema }])
     } catch (error) {
       console.error('Error processing AI request:', error)
-      // Provide more informative error message to the user
-      setMessages(m => [...m, {
-        role: 'assistant',
-        text: `Sorry, I encountered an error processing your request with the selected AI model. The system may be using simulated responses. Try changing the model or simplifying your request.`,
-      }])
+      setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I encountered an error. Try changing the model or simplifying your request.' }])
     } finally {
       setThinking(false)
     }
@@ -328,12 +287,12 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
         <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Prompt</span>
         <div className="ml-auto relative">
           <select
-            value={selectedModel}
-            onChange={e => setSelectedModel(e.target.value)}
+            value={selectedModelId}
+            onChange={e => setSelectedModelId(e.target.value)}
             className="appearance-none pl-2 pr-7 py-1 rounded-md border text-xs font-medium outline-none focus:ring-1 focus:ring-[var(--color-brand-500)] cursor-pointer"
             style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
           >
-            {AI_MODELS.map(model => (
+            {allModels.map(model => (
               <option key={model.id} value={model.id}>{model.name}</option>
             ))}
           </select>

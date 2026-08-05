@@ -12,6 +12,7 @@ const PORT = process.env.PORT || process.env.AI_PROXY_PORT || 8787
 const allowedOrigins = [
   'https://zac-ai.netlify.app',
   'http://localhost:5173',
+  'http://localhost:5174',
   'http://localhost:3000'
 ]
 app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }))
@@ -152,7 +153,7 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
   }
   if (type === 'structured') {
     requestBody.systemInstruction = {
-      parts: [{ text: 'Return ONLY a valid JSON object with keys: type, title, data, model. No markdown.' }]
+      parts: [{ text: 'You are a data visualization assistant. Return ONLY a valid JSON object with exactly these keys: type (one of: bar, line, pie, table), title (short string), data (array of objects each with label and value keys). No markdown, no code blocks, no explanation.' }]
     }
     requestBody.generationConfig = {
       ...requestBody.generationConfig,
@@ -164,9 +165,21 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
   const data = res.data || {}
   let text = data.candidates?.[0]?.content?.parts?.[0]?.text
     || data.message
-    || data.output?.candidates?.[0]?.content?.parts?.[0]?.text
     || 'No response generated'
 
+  // For structured requests, don't try to unwrap — return raw JSON
+  if (type === 'structured') {
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (parsed.type && parsed.data) return { schema: parsed, provider: 'google', modelId }
+      }
+    } catch { /* ignore parse error */ }
+    return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'google', modelId }
+  }
+
+  // For text responses, unwrap if the model returned a JSON wrapper
   if (typeof text === 'string') {
     const trimmed = text.trim()
     if (trimmed.startsWith('{')) {
@@ -175,10 +188,7 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
         if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
           const preferredKeys = ['message', 'text', 'response', 'content', 'reply', 'answer', 'output']
           for (const key of preferredKeys) {
-            if (parsed[key] && typeof parsed[key] === 'string') {
-              text = parsed[key]
-              break
-            }
+            if (parsed[key] && typeof parsed[key] === 'string') { text = parsed[key]; break }
           }
           if (text === trimmed) {
             const firstString = Object.values(parsed).find(v => typeof v === 'string')
@@ -189,13 +199,6 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
     }
   }
 
-  if (type === 'structured') {
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'google', modelId }
-    } catch { /* ignore parse error */ }
-    return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'google', modelId }
-  }
   return { text, provider: 'google', modelId }
 }
 
@@ -203,13 +206,17 @@ async function callGoogleGemini(prompt, modelId, apiKey, type) {
 async function callOpenRouter(prompt, modelId, apiKey, type) {
   let actualModel = modelId.replace(/^openrouter\//, '')
 
+  const messages = type === 'structured'
+    ? [
+        { role: 'system', content: 'You are a data visualization assistant. Return ONLY a valid JSON object with keys: type (bar|line|pie|table), title (string), data (array of {label, value}). No markdown, no explanation.' },
+        { role: 'user', content: prompt }
+      ]
+    : [{ role: 'user', content: prompt }]
+
   const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     model: actualModel,
-    messages: [
-      { role: 'system', content: 'Return ONLY a valid JSON object. No markdown, no explanation.' },
-      { role: 'user', content: prompt }
-    ],
-    ...(type === 'structured' ? { response_format: { type: 'json_object' }, temperature: 0.1 } : { temperature: 0.7 }),
+    messages,
+    temperature: type === 'structured' ? 0.1 : 0.7,
   }, {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -223,7 +230,10 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
   if (type === 'structured') {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) return { schema: JSON.parse(jsonMatch[0]), provider: 'openrouter', modelId }
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (parsed.type && parsed.data) return { schema: parsed, provider: 'openrouter', modelId }
+      }
     } catch { /* ignore parse error */ }
     return { schema: { type: 'text', title: prompt.slice(0, 40), content: text, model: modelId }, provider: 'openrouter', modelId }
   }
@@ -233,25 +243,28 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
 // ── Main AI endpoint ──────────────────────────────────────
 app.post('/api/ai', async (req, res) => {
   try {
-    const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text' } = req.body
+    const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey } = req.body
     const provider = resolveProvider(modelId)
-    console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type}`)
+    console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | userKey: ${!!userApiKey}`)
 
     let result
 
     if (provider === 'openai') {
-      if (!process.env.OPENAI_API_KEY) throw new Error('Missing OPENAI_API_KEY')
-      result = await callOpenAI(prompt, modelId, process.env.OPENAI_API_KEY, type)
+      const key = userApiKey || process.env.OPENAI_API_KEY
+      if (!key) throw new Error('Missing OPENAI_API_KEY')
+      result = await callOpenAI(prompt, modelId, key, type)
     } else if (provider === 'anthropic') {
-      if (!process.env.ANTHROPIC_API_KEY) throw new Error('Missing ANTHROPIC_API_KEY')
-      result = await callAnthropic(prompt, modelId, process.env.ANTHROPIC_API_KEY, type)
+      const key = userApiKey || process.env.ANTHROPIC_API_KEY
+      if (!key) throw new Error('Missing ANTHROPIC_API_KEY')
+      result = await callAnthropic(prompt, modelId, key, type)
     } else if (provider === 'google') {
-      const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
-      if (!apiKey) throw new Error('Missing GOOGLE_GEMINI_API_KEY')
-      result = await callGoogleGemini(prompt, modelId, apiKey, type)
+      const key = userApiKey || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
+      if (!key) throw new Error('Missing GOOGLE_GEMINI_API_KEY')
+      result = await callGoogleGemini(prompt, modelId, key, type)
     } else if (provider === 'openrouter') {
-      if (!process.env.OPENROUTER_API_KEY) throw new Error('Missing OPENROUTER_API_KEY')
-      result = await callOpenRouter(prompt, modelId, process.env.OPENROUTER_API_KEY, type)
+      const key = userApiKey || process.env.OPENROUTER_API_KEY
+      if (!key) throw new Error('Missing OPENROUTER_API_KEY')
+      result = await callOpenRouter(prompt, modelId, key, type)
     } else {
       throw new Error(`Unsupported provider: ${provider}`)
     }

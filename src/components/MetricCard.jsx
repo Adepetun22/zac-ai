@@ -8,6 +8,9 @@ export default function MetricCard({ title, value, change, icon: Icon, color = '
     amber: 'bg-amber-50 text-amber-600',
   }
 
+  const isPositive = change.startsWith('+')
+  const isNegative = change.startsWith('-')
+
   return (
     <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-4">
@@ -15,9 +18,9 @@ export default function MetricCard({ title, value, change, icon: Icon, color = '
           <Icon className="w-5 h-5" />
         </div>
         <div className={`flex items-center gap-1 text-sm font-medium ${
-          change.startsWith('+') ? 'text-emerald-600' : 'text-red-600'
+          isPositive ? 'text-emerald-600' : isNegative ? 'text-red-600' : 'text-slate-500'
         }`}>
-          {change.startsWith('+') ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+          {isPositive ? <TrendingUp className="w-4 h-4" /> : isNegative ? <TrendingDown className="w-4 h-4" /> : null}
           {change}
         </div>
       </div>

@@ -6,7 +6,7 @@ const Sidebar = ({ isSidebarOpen, toggleSidebar, liveblocksStatus = null }) => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Dashboard' },
+    { path: '/dashboard', label: 'Dashboard' },
     { path: '/analytics', label: 'Analytics' },
     { path: '/ai-models', label: 'AI Models' },
     { path: '/collaboration', label: 'Collaboration' },
