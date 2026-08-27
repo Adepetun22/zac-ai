@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus, Download } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -160,32 +160,71 @@ const TYPE_ICON = { bar: BarChart2, line: LineChart, pie: PieChart, table: Table
 // ─── Draggable Widget ─────────────────────────────────────────────────────────
 function Widget({ widget, onMove, onRemove }) {
   const dragOffset = useRef(null)
+  const isDragging = useRef(false)
 
-  const onMouseDown = (e) => {
+  const getClientCoords = (e) => {
+    if (e.touches && e.touches[0]) {
+      return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY }
+    }
+    return { clientX: e.clientX, clientY: e.clientY }
+  }
+
+  const onPointerDown = (e) => {
     if (e.target.closest('button')) return
-    e.preventDefault()
-    dragOffset.current = { x: e.clientX - widget.x, y: e.clientY - widget.y }
+    isDragging.current = false
+    const { clientX, clientY } = getClientCoords(e)
+    dragOffset.current = { x: clientX - widget.x, y: clientY - widget.y }
 
-    const onMouseMove = (ev) => {
+    const onPointerMove = (ev) => {
+      isDragging.current = true
+      const { clientX: cx, clientY: cy } = getClientCoords(ev)
       onMove(widget.id, {
-        x: Math.max(0, ev.clientX - dragOffset.current.x),
-        y: Math.max(0, ev.clientY - dragOffset.current.y),
+        x: Math.max(0, cx - dragOffset.current.x),
+        y: Math.max(0, cy - dragOffset.current.y),
       })
     }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+    const onPointerUp = () => {
+      document.removeEventListener('mousemove', onPointerMove)
+      document.removeEventListener('mouseup', onPointerUp)
+      document.removeEventListener('touchmove', onPointerMove)
+      document.removeEventListener('touchend', onPointerUp)
     }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('mousemove', onPointerMove)
+    document.addEventListener('mouseup', onPointerUp)
+    document.addEventListener('touchmove', onPointerMove, { passive: false })
+    document.addEventListener('touchend', onPointerUp)
+  }
+
+  const handleDownload = async () => {
+    if (widget.schema.type !== 'image' || !widget.schema.imageUrl) return
+    try {
+      const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+      const proxyUrl = backendUrl ? `${backendUrl}/proxy-image?url=${encodeURIComponent(widget.schema.imageUrl)}` : widget.schema.imageUrl
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Download failed')
+      const blob = await res.blob()
+      const mimeToExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
+      const ext = mimeToExt[blob.type] || 'jpg'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${widget.schema.title || 'image'}.${ext}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.warn('Download failed:', err)
+    }
   }
 
   const Icon = TYPE_ICON[widget.schema.type] || BarChart2
 
   return (
     <div
-      onMouseDown={onMouseDown}
-      className="absolute bg-white border border-slate-200 rounded-xl shadow-sm select-none
+      onMouseDown={onPointerDown}
+      onTouchStart={onPointerDown}
+      className="absolute bg-white border border-slate-200 rounded-xl shadow-sm select-none touch-none
         w-[85vw] max-w-[280px] sm:max-w-[300px] min-w-[200px] min-w-0
         overflow-hidden"
       style={{ left: widget.x, top: widget.y }}
@@ -196,6 +235,11 @@ function Widget({ widget, onMove, onRemove }) {
           <span className="text-sm font-semibold text-slate-800 truncate max-w-[180px]">{widget.schema.title}</span>
         </div>
         <div className="flex items-center gap-1">
+          {widget.schema.type === 'image' && (
+            <button onClick={(e) => { e.stopPropagation(); handleDownload() }} className="p-1 hover:bg-slate-100 rounded cursor-pointer text-slate-400 hover:text-slate-600 transition-colors" title="Download image">
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
           <GripVertical className="w-4 h-4 text-slate-300" />
           <button onClick={() => onRemove(widget.id)} className="p-1 hover:bg-slate-100 rounded cursor-pointer text-slate-400 hover:text-slate-600 transition-colors">
             <X className="w-3.5 h-3.5" />

@@ -323,6 +323,78 @@ app.get('/api/image', async (req, res) => {
   const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
   res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
 })
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' })
+
+  const encoded = encodeURIComponent(prompt)
+
+  try {
+    const hfKey = process.env.HUGGING_FACE_API_KEY || process.env.HF_API_KEY
+    if (hfKey) {
+      const model = 'stabilityai/stable-diffusion-xl-base-1.0'
+      const hfUrl = `https://api-inference.huggingface.co/models/${model}`
+      const hfRes = await fetch(hfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${hfKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: prompt }),
+      })
+
+      if (hfRes.ok) {
+        const buffer = await hfRes.arrayBuffer()
+        const base64 = Buffer.from(buffer).toString('base64')
+        const imageUrl = `data:image/jpeg;base64,${base64}`
+        return res.json({ imageUrl, provider: 'huggingface', modelId: model })
+      }
+
+      console.warn('[WARN] HF image generation failed:', hfRes.status, await hfRes.text())
+    }
+  } catch (error) {
+    console.warn('[WARN] HF image generation error:', error.message)
+  }
+
+  const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
+  res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
+})
+
+app.get('/api/proxy-image', async (req, res) => {
+  const url = (req.query.url || '').trim()
+  if (!url) return res.status(400).json({ error: 'Missing url' })
+
+  try {
+    const upstream = await fetch(url)
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `Upstream responded with ${upstream.status}` })
+    }
+
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Disposition', 'attachment')
+
+    if (upstream.body) {
+      const reader = upstream.body.getReader()
+      const pump = () => {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            res.end()
+            return
+          }
+          res.write(Buffer.from(value.buffer), (err) => {
+            if (err) return res.end()
+            pump()
+          })
+        }).catch(() => res.end())
+      }
+      pump()
+    } else {
+      res.end()
+    }
+  } catch (error) {
+    console.error('[ERROR] Image proxy failed:', error.message)
+    res.status(500).json({ error: 'Image proxy failed', detail: error.message })
+  }
+})
 
 app.get('/api/dashboard', async (req, res) => {
   const userId = req.query.userId

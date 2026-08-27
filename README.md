@@ -35,7 +35,6 @@ The platform is designed for AI engineers, data analysts, product teams, and dev
 The platform integrates with multiple AI providers and models to offer diverse capabilities:
 
 ### Supported AI Providers
-- **Google Gemini**: Gemini 2.0 Flash (default), Gemini Pro, Gemini 1.5 Flash
 - **OpenRouter**: Google Gemma 4 26B A4B, OpenAI GPT-OSS 20B, Cohere North Mini Code, Poolside Laguna S 2.1
 - **Hugging Face**: Free image generation models
 - **Meta**: Llama 3 70B (via OpenRouter)

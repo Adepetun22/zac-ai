@@ -161,33 +161,22 @@ export default function Header({ user, onMenuToggle, onNavigate, liveblocksStatu
 
                 <div className="max-h-64 overflow-y-auto">
                   {connectedUsers.filter(u => {
-                    const presenceName = u.presence?.name;
-                    const name = presenceName || `User ${u.connectionId}`;
-                    const currentName = user?.name || user?.email;
+                    const presenceUserId = u.presence?.userId;
                     const currentUserId = user?.id;
 
-                    // Always exclude the current user's own connections
-                    if (u.presence?.userId && currentUserId && u.presence.userId === currentUserId) return false;
-                    // Exclude anonymous connections without a real name
-                    if (!presenceName) return false;
-                    // Exclude if name matches current user
-                    if (name === currentName) return false;
+                    if (presenceUserId && currentUserId && presenceUserId === currentUserId) return false;
                     return true;
                   }).length > 0 ? (
                     <ul>
                       {connectedUsers.filter(u => {
-                        const presenceName = u.presence?.name;
-                        const name = presenceName || `User ${u.connectionId}`;
-                        const currentName = user?.name || user?.email;
+                        const presenceUserId = u.presence?.userId;
                         const currentUserId = user?.id;
 
-                        if (u.presence?.userId && currentUserId && u.presence.userId === currentUserId) return false;
-                        if (!presenceName) return false;
-                        if (name === currentName) return false;
+                        if (presenceUserId && currentUserId && presenceUserId === currentUserId) return false;
                         return true;
                       }).map((u) => {
                         const name = u.presence?.name || `User ${u.connectionId}`;
-                        const targetUserId = u.presence?.userId;
+                        const targetUserId = u.presence?.userId || u.connectionId;
                         return (
                           <li key={u.connectionId} className="px-4 py-2.5 border-b border-slate-100 dark:border-[var(--color-border-subtle)] last:border-b-0">
                             <div className="flex items-center justify-between gap-2">

@@ -23,10 +23,16 @@ export function useWebSocket({
 
     Object.values(state).forEach((presences) => {
       presences.forEach((p) => {
-        if (p.id && p.id !== currentUserId) {
-          activeUserIds.add(p.id);
-          if (!presenceByUserId.has(p.id)) {
-            presenceByUserId.set(p.id, p);
+        const userId = p.userId || p.id;
+        if (userId && userId !== currentUserId) {
+          activeUserIds.add(userId);
+          if (!presenceByUserId.has(userId)) {
+            presenceByUserId.set(userId, {
+              id: userId,
+              name: p.name || 'Anonymous',
+              color: p.color,
+              connectionId: p.id,
+            });
           }
         }
       });
@@ -89,24 +95,27 @@ export function useWebSocket({
         syncPeers(state, user.id);
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
+        const seen = seenUsersRef.current;
         newPresences.forEach((p) => {
-          if (p.id !== user.id) {
-            setTimeout(() => callbacks.current.onPeerJoin?.(p), 100);
+          const userId = p.userId || p.id;
+          const normalizedPeer = {
+            id: userId,
+            name: p.name || 'Anonymous',
+            color: p.color,
+            connectionId: p.id,
+          };
+          if (userId && userId !== user.id && !seen.has(userId)) {
+            seen.set(userId, 0);
+            callbacks.current.onPeerJoin?.(normalizedPeer);
+          }
+          if (userId && userId !== user.id) {
+            seen.set(userId, (seen.get(userId) || 0) + 1);
           }
         });
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
-        if (key !== user.id) {
-          const seen = seenUsersRef.current;
-          const currentCount = seen.get(key) || 0;
-          const newCount = Math.max(0, currentCount - 1);
-          if (newCount === 0) {
-            seen.delete(key);
-            callbacks.current.onPeerLeave?.(key);
-          } else {
-            seen.set(key, newCount);
-          }
-        }
+        // We can't reliably map connectionId -> userId here without extra state,
+        // so we defer leave handling to the next 'sync' event which has the full picture.
       })
       .on('broadcast', { event: 'cursor' }, ({ payload }) => {
         callbacks.current.onCursorMove?.(payload);
@@ -119,7 +128,7 @@ export function useWebSocket({
       if (status === 'SUBSCRIBED') {
         const trackUser = () => {
           channel.track({
-            id: user.id,
+            userId: user.id,
             name: user.name || 'Anonymous',
             color: user.color,
           }).catch(error => {
