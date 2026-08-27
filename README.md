@@ -1,9 +1,5 @@
 # Zac-AI Dashboard
 
-Zac-AI Dashboard is a modern, collaborative React application designed for AI-powered dashboard functionality with real-time collaboration features. The project focuses on AI agent interactions, real-time collaboration, and customizable data dashboards, enabling teams to visualize and analyze AI-generated insights together.
-
-## About
-
 Zac-AI Dashboard is a cutting-edge platform that combines AI-powered data visualization with real-time collaborative features. It enables teams to work together on interactive dashboards, generate charts and visualizations through natural language prompts, and collaborate in real-time with cursor tracking and shared canvases.
 
 The platform is designed for AI engineers, data analysts, product teams, and developers who need a unified interface for managing multiple AI models and collaborating on AI-generated insights and visualizations.
