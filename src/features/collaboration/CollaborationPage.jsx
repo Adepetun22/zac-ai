@@ -17,7 +17,6 @@ import AIService from '../../services/aiService'
 
 // Built-in free models always available (no API key needed)
 const FREE_MODELS = [
-  { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash (Free)', provider: 'Google' },
   { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
   { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
@@ -217,7 +216,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   ])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
-  const [selectedModelId, setSelectedModelId] = useState('google/gemini-2.0-flash')
+  const [selectedModelId, setSelectedModelId] = useState('openrouter/google/gemma-4-26b-a4b-it:free')
   const bottomRef = useRef(null)
 
   // Merge user-configured active models with built-in free models
@@ -492,11 +491,6 @@ function ModelExplainerModal({ onClose }) {
 
           <div className="space-y-3">
             <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Gemini 2.0 Flash (Free)</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Best for charts and structured data. Fast, reliable JSON output for revenue trends, distributions, and tables.</p>
-            </div>
-
-            <div className="p-3 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
               <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Gemma 4 26B A4B (Free)</p>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>General purpose open-source model. Good for everyday chat and simple text tasks.</p>
             </div>
@@ -560,11 +554,13 @@ export default function CollaborationPage() {
   const { user } = useAuthStore();
   const { addNotification } = useNotification();
   const { setSession, setDisconnectUser, clearSession } = useCollaborationStore();
-  const [currentUser] = useState(() => ({
-    id: 'user-' + Math.random().toString(36).substring(2, 8),
+  const currentUser = {
+    id: user?.id || 'anonymous',
     name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
-    color: getPeerColor('user-' + Math.random().toString(36).substring(2, 8)),
-  }))
+    color: getPeerColor(user?.id || 'anonymous'),
+  }
+  const currentUserRef = useRef(currentUser)
+  currentUserRef.current = currentUser
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
 
@@ -807,12 +803,11 @@ export default function CollaborationPage() {
 
   useEffect(() => {
     const handler = (e) => {
-      // Only send cursor movement if we have a valid connection
       if (sessionId) {
         send('cursor:move', {
-          peerId: currentUser.id,
-          name: currentUser.name,
-          color: currentUser.color,
+          peerId: currentUserRef.current.id,
+          name: currentUserRef.current.name,
+          color: currentUserRef.current.color,
           x: e.clientX,
           y: e.clientY,
         })
@@ -820,7 +815,7 @@ export default function CollaborationPage() {
     }
     window.addEventListener('mousemove', handler)
     return () => window.removeEventListener('mousemove', handler)
-  }, [send, currentUser, sessionId])
+  }, [send, sessionId])
 
   useEffect(() => {
     const cursors = cursorsRef.current

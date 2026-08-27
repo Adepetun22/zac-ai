@@ -1,16 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../config/supabase';
 
-/**
- * Real-time multiplayer presence + cursor sync backed by Supabase Realtime.
- *
- * - Real users join the same `room` (session) channel and appear as peers via
- *   Supabase Presence (no simulated bots).
- * - Cursor moves are broadcast peer-to-peer over the channel (low latency).
- * - Widget changes are broadcast so every participant stays in sync.
- *
- * When Supabase is not configured the hook is a no-op so the page still renders.
- */
 export function useWebSocket({
   room,
   user,
@@ -21,11 +11,49 @@ export function useWebSocket({
 }) {
   const channelRef = useRef(null);
   const callbacks = useRef({});
+  const seenUsersRef = useRef(new Map());
 
-  // Keep latest callbacks available to the channel handlers without re-subscribing.
   useEffect(() => {
     callbacks.current = { onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave };
   }, [onCursorMove, onWidgetSync, onPeerJoin, onPeerLeave]);
+
+  const syncPeers = useCallback((state, currentUserId) => {
+    const activeUserIds = new Set();
+    const presenceByUserId = new Map();
+
+    Object.values(state).forEach((presences) => {
+      presences.forEach((p) => {
+        if (p.id && p.id !== currentUserId) {
+          activeUserIds.add(p.id);
+          if (!presenceByUserId.has(p.id)) {
+            presenceByUserId.set(p.id, p);
+          }
+        }
+      });
+    });
+
+    const seen = seenUsersRef.current;
+
+    presenceByUserId.forEach((presence, userId) => {
+      if (!seen.has(userId)) {
+        seen.set(userId, 0);
+        callbacks.current.onPeerJoin?.(presence);
+      }
+      seen.set(userId, (seen.get(userId) || 0) + 1);
+    });
+
+    seen.forEach((count, userId) => {
+      if (!activeUserIds.has(userId)) {
+        const newCount = Math.max(0, count - 1);
+        if (newCount === 0) {
+          seen.delete(userId);
+          callbacks.current.onPeerLeave?.(userId);
+        } else {
+          seen.set(userId, newCount);
+        }
+      }
+    });
+  }, []);
 
   const send = useCallback(async (type, payload) => {
     const channel = channelRef.current;
@@ -58,24 +86,26 @@ export function useWebSocket({
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
-        Object.values(state).forEach((presences) => {
-          presences.forEach((p) => {
-            if (p.id !== user.id) callbacks.current.onPeerJoin?.(p);
-          });
-        });
+        syncPeers(state, user.id);
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
         newPresences.forEach((p) => {
           if (p.id !== user.id) {
-            // Add a delay to ensure proper initialization before triggering join
             setTimeout(() => callbacks.current.onPeerJoin?.(p), 100);
           }
         });
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
-        // Ensure we only process the leave event once
         if (key !== user.id) {
-          callbacks.current.onPeerLeave?.(key);
+          const seen = seenUsersRef.current;
+          const currentCount = seen.get(key) || 0;
+          const newCount = Math.max(0, currentCount - 1);
+          if (newCount === 0) {
+            seen.delete(key);
+            callbacks.current.onPeerLeave?.(key);
+          } else {
+            seen.set(key, newCount);
+          }
         }
       })
       .on('broadcast', { event: 'cursor' }, ({ payload }) => {
@@ -87,7 +117,6 @@ export function useWebSocket({
 
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        // Track user presence with retry logic in case of failure
         const trackUser = () => {
           channel.track({
             id: user.id,
@@ -95,24 +124,23 @@ export function useWebSocket({
             color: user.color,
           }).catch(error => {
             console.warn('Failed to track user presence, retrying...', error);
-            // Retry tracking after a short delay
             setTimeout(trackUser, 1000);
           });
         };
-        
+
         trackUser();
       }
     });
 
     return () => {
-      // Only untrack if channel exists and is subscribed
       if (channelRef.current && channelRef.current.state === 'SUBSCRIBED') {
-        channel.untrack().catch(() => {}); // Ignore untrack errors
+        channelRef.current.untrack().catch(() => {});
       }
       supabase.removeChannel(channel);
       channelRef.current = null;
+      seenUsersRef.current.clear();
     };
-  }, [room, user?.id, user?.name, user?.color]);
+  }, [room, user?.id, user?.name, user?.color, syncPeers]);
 
   return { send };
 }
