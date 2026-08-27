@@ -122,6 +122,24 @@ function App() {
   const { addUserNotification } = useNotificationStore();
   const { initTheme } = useThemeStore();
 
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+
+  useEffect(() => {
+    if (!backendUrl) return;
+
+    const ping = async () => {
+      try {
+        await fetch(`${backendUrl}/api/health`, { mode: 'no-cors' });
+      } catch {
+        // ignore ping failures
+      }
+    };
+
+    ping();
+    const id = setInterval(ping, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [backendUrl]);
+
   // Initialize persisted theme/accent on app load
   useEffect(() => {
     initTheme();
