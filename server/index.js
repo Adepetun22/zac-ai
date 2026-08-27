@@ -373,6 +373,6 @@ app.get('/api/dashboard', async (req, res) => {
   }
 })
 
-app.listen(PORT, () => {
-  console.log(`[ai-proxy] listening on http://localhost:${PORT}`)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[ai-proxy] listening on port ${PORT}`)
 })
