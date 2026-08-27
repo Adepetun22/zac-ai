@@ -323,40 +323,6 @@ app.get('/api/image', async (req, res) => {
   const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
   res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
 })
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' })
-
-  const encoded = encodeURIComponent(prompt)
-
-  try {
-    const hfKey = process.env.HUGGING_FACE_API_KEY || process.env.HF_API_KEY
-    if (hfKey) {
-      const model = 'stabilityai/stable-diffusion-xl-base-1.0'
-      const hfUrl = `https://api-inference.huggingface.co/models/${model}`
-      const hfRes = await fetch(hfUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${hfKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: prompt }),
-      })
-
-      if (hfRes.ok) {
-        const buffer = await hfRes.arrayBuffer()
-        const base64 = Buffer.from(buffer).toString('base64')
-        const imageUrl = `data:image/jpeg;base64,${base64}`
-        return res.json({ imageUrl, provider: 'huggingface', modelId: model })
-      }
-
-      console.warn('[WARN] HF image generation failed:', hfRes.status, await hfRes.text())
-    }
-  } catch (error) {
-    console.warn('[WARN] HF image generation error:', error.message)
-  }
-
-  const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
-  res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
-})
 
 app.get('/api/proxy-image', async (req, res) => {
   const url = (req.query.url || '').trim()
