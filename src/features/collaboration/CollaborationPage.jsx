@@ -233,8 +233,8 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace('/api', '').replace(/\/$/, '') || ''
-        const response = await fetch(`${backendUrl}/api/health`);
+        const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '') || ''
+        const response = await fetch(`${backendUrl}/health`);
         const data = await response.json();
         if (!response.ok) {
           setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Backend server is running but may not have API keys configured. Responses will be simulated.' }]);

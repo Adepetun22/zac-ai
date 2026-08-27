@@ -129,7 +129,7 @@ function App() {
 
     const ping = async () => {
       try {
-        await fetch(`${backendUrl}/api/health`, { mode: 'no-cors' });
+        await fetch(`${backendUrl}/health`, { mode: 'no-cors' });
       } catch {
         // ignore ping failures
       }
