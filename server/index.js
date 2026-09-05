@@ -282,18 +282,28 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
       ]
     : [{ role: 'user', content: prompt }]
 
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': 'https://zac-ai.netlify.app',
+    'X-Title': 'Zac-AI-Dashboard'
+  }
+  console.log('[DEBUG] OpenRouter request headers:', {
+    ...headers,
+    Authorization: headers.Authorization ? `${headers.Authorization.slice(0, 15)}...` : undefined
+  })
+
   const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     model: actualModel,
     messages,
     temperature: type === 'structured' ? 0.1 : 0.7,
   }, {
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://zac-ai.netlify.app',
-      'X-Title': 'Zac-AI-Dashboard'
-    }
+    headers,
+    maxRedirects: 0
   })
+
+  console.log('[DEBUG] OpenRouter response status:', response.status)
+  console.log('[DEBUG] OpenRouter response headers:', response.headers)
 
   const text = response.data.choices[0].message.content
   if (type === 'structured') {
