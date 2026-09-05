@@ -368,6 +368,7 @@ app.post('/api/ai', async (req, res) => {
       result = await callGoogleGemini(prompt, modelId, key, type)
     } else if (provider === 'openrouter') {
       const key = userApiKey || process.env.OPENROUTER_API_KEY
+      console.log('[DEBUG] OpenRouter key present:', !!key, 'length:', key?.length)
       if (!key) throw Object.assign(new Error('Missing OPENROUTER_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENROUTER_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callOpenRouter(prompt, modelId, key, type)
     } else {
