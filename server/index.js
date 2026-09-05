@@ -97,7 +97,8 @@ app.post('/api/liveblocks-auth', async (req, res) => {
     }
 
     const { status, body } = await session.authorize()
-    return res.status(status).json(body)
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body
+    return res.status(status).json(parsed)
   } catch (error) {
     console.error('[ERROR] Liveblocks auth failed:', error.message)
     return res.status(500).json({
