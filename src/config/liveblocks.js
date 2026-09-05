@@ -2,28 +2,28 @@ import { createClient } from "@liveblocks/client";
 import { resolveUsers, resolveRooms } from "../liveblocks.config";
 import { createLiveblocksAuthEndpoint } from "../services/liveblocksAuth";
 
-// Initialize the Liveblocks client. We require BOTH a publicApiKey (used as
-// the project's public identifier) AND an authEndpoint (which mints per-user
-// tokens via our backend). Without authEndpoint, the WebSocket connection
-// fails with "Timed out during websocket connection" because the client
-// cannot authenticate.
-export const publicApiKey = import.meta.env.VITE_LIVEBLOCKS_PUBLIC_KEY;
+// We authenticate Liveblocks via a backend `/api/liveblocks-auth` endpoint
+// that mints short-lived per-user tokens. That means we use ONLY
+// `authEndpoint` — passing `publicApiKey` as well is a hard error in v3
+// ("You cannot simultaneously use publicApiKey and authEndpoint").
+//
+// Note: the Liveblocks dashboard calls this project's identifier the
+// "public key", but we never need to ship it to the browser when using
+// authEndpoint — the secret key on the backend is what matters.
 
-if (!publicApiKey) {
-  console.warn("VITE_LIVEBLOCKS_PUBLIC_KEY is not defined. Liveblocks functionality will be disabled.");
-}
+const authEndpoint = createLiveblocksAuthEndpoint();
 
-const authEndpoint = publicApiKey ? createLiveblocksAuthEndpoint() : null;
-
-export const liveblocksClient = publicApiKey && authEndpoint
+export const liveblocksClient = authEndpoint
   ? createClient({
-      publicApiKey,
       authEndpoint,
       resolveUsers,
       resolveRooms,
     })
   : null;
 
+// Kept for legacy imports; intentionally undefined so callers fall through
+// to the authEndpoint path. The browser never needs the public key.
+export const publicApiKey = undefined;
 export const liveblocksAuthEndpoint = authEndpoint;
 
 // Export a function to enter a room
