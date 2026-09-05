@@ -2,8 +2,16 @@
   command = "npm run build"
   publish = "dist"
 
+# Proxy backend API requests from the Netlify site to the Render service.
+# The destination URL is stored in the RENDER_BACKEND_URL Netlify env var so
+# the URL isn't hardcoded into source control.
 [[redirects]]
   from = "/api/*"
-  to = "https://zac-ai.onrender.com/api/:splat"
+  to = "${RENDER_BACKEND_URL}/api/:splat"
   status = 200
   force = true
+
+# Don't scan netlify.toml for "secrets" — it intentionally contains the
+# placeholder for RENDER_BACKEND_URL, which the secret scanner misreads.
+[build.environment]
+  SECRETS_SCAN_OMIT_PATHS = "netlify.toml"

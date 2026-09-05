@@ -146,6 +146,7 @@ The application will be available at http://localhost:5173
 | `VITE_SUPABASE_URL` | Supabase project URL | Yes |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
 | `VITE_BACKEND_URL` | AI proxy backend URL | Recommended |
+| `RENDER_BACKEND_URL` | Render service URL used by the Netlify `/api/*` redirect (e.g. `https://zac-ai.onrender.com`). Set in Netlify's site env, not in the repo. | Yes (Netlify) |
 | `OPENROUTER_API_KEY` | OpenRouter API key | Optional (for OpenRouter models) |
 | `GOOGLE_AI_API_KEY` | Google AI API key | Optional (for Gemini models) |
 | `ANTHROPIC_API_KEY` | Anthropic API key | Optional (for Claude models) |
