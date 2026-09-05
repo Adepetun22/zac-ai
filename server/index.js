@@ -62,6 +62,7 @@ app.post('/api/liveblocks-auth', async (req, res) => {
   // Pull Supabase auth from headers (browser sends the access token after login).
   const authHeader = req.headers.authorization || ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  console.log('[DEBUG] Liveblocks auth header present:', !!authHeader, 'token present:', !!token, 'token length:', token?.length)
 
   if (!token || !supabase) {
     return res.status(401).json({
@@ -72,6 +73,7 @@ app.post('/api/liveblocks-auth', async (req, res) => {
 
   try {
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token)
+    console.log('[DEBUG] Liveblocks supabase getUser:', !!user, 'userErr:', userErr?.message)
     if (userErr || !user) {
       return res.status(401).json({
         error: 'forbidden',

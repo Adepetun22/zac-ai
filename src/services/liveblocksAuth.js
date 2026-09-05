@@ -9,9 +9,11 @@ export async function getSupabaseAccessToken() {
   if (!supabase) return null;
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token || null;
+    const token = session?.access_token || null
+    console.log('[DEBUG] getSupabaseAccessToken:', !!token, 'length:', token?.length)
+    return token
   } catch {
-    return null;
+    return null
   }
 }
 
