@@ -68,11 +68,16 @@ class AIService {
     } catch (error) {
       console.warn(`Primary model ${modelId} failed:`, error.message, `(kind=${error.kind || 'unknown'}, code=${error.code || 'unknown'})`)
 
-      // Code/config errors won't be fixed by trying a different model from the same
-      // provider, but they CAN be fixed by switching provider — e.g. a missing
-      // OPENROUTER_API_KEY won't help by trying gpt-oss-20b, but it might be fixed
-      // by switching to google/gemini-2.0-flash. So try fallbacks across providers
-      // only, and stop on the first code-error.
+      // Config / code errors (MISSING_API_KEY, INVALID_API_KEY, UNSUPPORTED_PROVIDER,
+      // INTERNAL_ERROR, NETWORK) won't be fixed by trying a different model from the
+      // same provider. Bail out immediately so the caller sees the real reason —
+      // don't bury it under a fake "Hello" simulated response.
+      if (error?.kind === 'code') throw error;
+
+      // Provider errors (RATE_LIMITED, UPSTREAM_UNAVAILABLE, MODEL_NOT_FOUND,
+      // BAD_REQUEST, UPSTREAM_TIMEOUT) may be transient. Try other providers in
+      // the fallback chain, but skip ones from the same provider — they share
+      // the same API key and will fail identically.
       if (type !== 'structured') {
         const fallbackModels = this.getFallbackModels(modelId)
         for (const fallbackModel of fallbackModels) {
@@ -85,6 +90,8 @@ class AIService {
               return result
             }
           } catch (fallbackError) {
+            // If a fallback hits a code error too, stop — further retries won't help.
+            if (fallbackError?.kind === 'code') throw fallbackError
             console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message, `(kind=${fallbackError.kind || 'unknown'})`)
             continue
           }
@@ -92,9 +99,8 @@ class AIService {
       }
     }
 
-    // Only simulate as last resort, and ONLY when the original failure was a
-    // provider issue (transient). If the backend itself is misconfigured
-    // (code error), simulating would hide the real problem from the user.
+    // Provider error only — simulate so the UI still shows *something* during
+    // transient outages. If a code error reached this point, we already threw above.
     if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
     return this.simulateAIResponse(prompt, modelId)
   }
