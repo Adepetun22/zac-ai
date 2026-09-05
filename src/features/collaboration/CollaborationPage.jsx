@@ -13,7 +13,7 @@ import useAuthStore from '../../store/authStore'
 import useCollaborationStore from '../../store/collaborationStore'
 import useDashboardStore from '../../store/dashboardStore'
 import { useNotification } from '../../components/useNotification'
-import AIService from '../../services/aiService'
+import AIService, { AIError, explainError } from '../../services/aiService'
 
 // Built-in free models always available (no API key needed)
 const FREE_MODELS = [
@@ -88,7 +88,19 @@ async function processAIRequest(prompt, modelId, apiKey = null) {
     return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: String(aiResponse) }
   } catch (error) {
     console.error('AI processing error:', error)
-    return { type: 'text', title: `Error: ${error.message}`, model: modelId, content: `Failed to get a response from ${modelId}. ${error.message}` }
+    const heading = error instanceof AIError
+      ? `${error.isCode() ? 'Configuration error' : 'AI provider error'}: ${error.code}`
+      : 'Unexpected error'
+    const detail = error instanceof AIError ? explainError(error) : error.message
+    return {
+      type: 'text',
+      title: heading,
+      model: modelId,
+      error: true,
+      errorKind: error instanceof AIError ? error.kind : 'code',
+      errorCode: error instanceof AIError ? error.code : 'UNKNOWN',
+      content: `${detail}\n\nModel: ${modelId}`,
+    }
   }
 }
 
@@ -262,6 +274,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   const [thinking, setThinking] = useState(false)
   const [selectedModelId, setSelectedModelId] = useState('openrouter/google/gemma-4-26b-a4b-it:free')
   const bottomRef = useRef(null)
+  const { addNotification } = useNotification()
 
   // Merge user-configured active models with built-in free models
   const { aiModels: userModels } = useDashboardStore()
@@ -304,6 +317,16 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
     try {
       const selectedModel = allModels.find(m => m.id === selectedModelId)
       const schema = await processAIRequest(text, selectedModelId, selectedModel?.api_key || null)
+
+      if (schema?.error) {
+        const isCode = schema.errorKind === 'code'
+        const notificationType = isCode ? 'error' : 'warning'
+        const title = isCode ? 'AI is misconfigured' : 'AI provider error'
+        addNotification(explainError({ code: schema.errorCode, provider: null, message: schema.content, kind: schema.errorKind }), notificationType, title)
+        setMessages(m => [...m, { role: 'assistant', text: `⚠️ ${schema.title}\n\n${schema.content}` }])
+        return
+      }
+
       onAddWidget(schema)
       const modelName = selectedModel?.name || selectedModelId
 
@@ -315,7 +338,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
       setMessages(m => [...m, { role: 'assistant', text: aiResponseText, schema }])
     } catch (error) {
       console.error('Error processing AI request:', error)
-      setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I encountered an error. Try changing the model or simplifying your request.' }])
+      setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I encountered an unexpected error. Try changing the model or simplifying your request.' }])
     } finally {
       setThinking(false)
     }

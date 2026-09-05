@@ -24,3 +24,5 @@ services:
         sync: false
       - key: HUGGING_FACE_API_KEY
         sync: false
+      - key: LIVEBLOCKS_SECRET_KEY
+        sync: false

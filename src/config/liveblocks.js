@@ -1,29 +1,36 @@
 import { createClient } from "@liveblocks/client";
 import { resolveUsers, resolveRooms } from "../liveblocks.config";
+import { createLiveblocksAuthEndpoint } from "../services/liveblocksAuth";
 
-// Initialize the Liveblocks client with the public API key from environment variables
-// Following the project specification that requires VITE_LIVEBLOCKS_PUBLIC_KEY
+// Initialize the Liveblocks client. We require BOTH a publicApiKey (used as
+// the project's public identifier) AND an authEndpoint (which mints per-user
+// tokens via our backend). Without authEndpoint, the WebSocket connection
+// fails with "Timed out during websocket connection" because the client
+// cannot authenticate.
 export const publicApiKey = import.meta.env.VITE_LIVEBLOCKS_PUBLIC_KEY;
 
 if (!publicApiKey) {
   console.warn("VITE_LIVEBLOCKS_PUBLIC_KEY is not defined. Liveblocks functionality will be disabled.");
 }
 
-// Create the Liveblocks client
-export const liveblocksClient = publicApiKey
+const authEndpoint = publicApiKey ? createLiveblocksAuthEndpoint() : null;
+
+export const liveblocksClient = publicApiKey && authEndpoint
   ? createClient({
-      publicApiKey: publicApiKey,
+      publicApiKey,
+      authEndpoint,
       resolveUsers,
       resolveRooms,
     })
   : null;
+
+export const liveblocksAuthEndpoint = authEndpoint;
 
 // Export a function to enter a room
 export const enterLiveblocksRoom = (roomId) => {
   if (!liveblocksClient) {
     console.warn("Liveblocks client not initialized. Returning mock room functions.");
 
-    // Mock implementation for when Liveblocks is not configured
     return {
       room: {
         subscribe: () => () => {},

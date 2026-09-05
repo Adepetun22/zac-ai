@@ -13,7 +13,7 @@ import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
 import useAuthStore from './store/authStore';
 import useThemeStore from './store/themeStore';
-import { liveblocksClient, publicApiKey } from './config/liveblocks';
+import { liveblocksClient, publicApiKey, liveblocksAuthEndpoint } from './config/liveblocks';
 import { resolveUsers, resolveRooms } from './liveblocks.config';
 import { useLiveblocks } from './hooks/useLiveblocks';
 import NotificationProvider from './components/Notification';
@@ -247,9 +247,14 @@ function App() {
     </Router>
   );
 
-  if (liveblocksClient && publicApiKey) {
+  if (liveblocksClient && publicApiKey && liveblocksAuthEndpoint) {
     return (
-      <LiveblocksProvider publicApiKey={publicApiKey} resolveUsers={resolveUsers} resolveRooms={resolveRooms}>
+      <LiveblocksProvider
+        publicApiKey={publicApiKey}
+        authEndpoint={liveblocksAuthEndpoint}
+        resolveUsers={resolveUsers}
+        resolveRooms={resolveRooms}
+      >
         <NotificationProvider>
           {innerContent}
         </NotificationProvider>

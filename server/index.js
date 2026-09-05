@@ -3,6 +3,7 @@ import cors from 'cors'
 import axios from 'axios'
 import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
+import { Liveblocks } from '@liveblocks/node'
 
 dotenv.config()
 
@@ -35,9 +36,76 @@ app.get('/api/health', (req, res) => {
       anthropic: !!process.env.ANTHROPIC_API_KEY,
       google: !!process.env.GOOGLE_GEMINI_API_KEY,
       openrouter: !!process.env.OPENROUTER_API_KEY,
-    }
+    },
+    liveblocks: !!process.env.LIVEBLOCKS_SECRET_KEY,
   });
 });
+
+// ── Liveblocks auth ─────────────────────────────────────────
+//
+// The browser Liveblocks client calls this endpoint to mint a short-lived
+// access token for the current user. Without it the WebSocket connection
+// fails with "Timed out during websocket connection" because the client
+// can't authenticate. Requires LIVEBLOCKS_SECRET_KEY on the server.
+const liveblocks = process.env.LIVEBLOCKS_SECRET_KEY
+  ? new Liveblocks({ secret: process.env.LIVEBLOCKS_SECRET_KEY })
+  : null
+
+app.post('/api/liveblocks-auth', async (req, res) => {
+  if (!liveblocks) {
+    return res.status(503).json({
+      error: 'Liveblocks not configured on server',
+      detail: 'LIVEBLOCKS_SECRET_KEY is missing on the backend. Set it in the Render dashboard.',
+    })
+  }
+
+  // Pull Supabase auth from headers (browser sends the access token after login).
+  const authHeader = req.headers.authorization || ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+
+  if (!token || !supabase) {
+    return res.status(401).json({
+      error: 'forbidden',
+      reason: 'Missing or invalid auth token. Sign in first.',
+    })
+  }
+
+  try {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser(token)
+    if (userErr || !user) {
+      return res.status(401).json({
+        error: 'forbidden',
+        reason: 'Could not verify user identity.',
+      })
+    }
+
+    const { room } = req.body || {}
+    const session = liveblocks.prepareSession(user.id, {
+      userInfo: {
+        name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+        avatar: user.user_metadata?.avatar_url || undefined,
+      },
+    })
+
+    // If a specific room is requested, grant full access; otherwise allow the
+    // session to enter any room the client asks for (Liveblocks will validate
+    // room access server-side per the project's ACL settings).
+    if (room && typeof room === 'string') {
+      session.allow(room, session.FULL_ACCESS)
+    } else {
+      session.allow('*', session.FULL_ACCESS)
+    }
+
+    const { status, body } = await session.authorize()
+    return res.status(status).json(body)
+  } catch (error) {
+    console.error('[ERROR] Liveblocks auth failed:', error.message)
+    return res.status(500).json({
+      error: 'Liveblocks auth failed',
+      detail: error.message,
+    })
+  }
+})
 
 // Logging middleware
 app.use((req, res, next) => {
@@ -240,49 +308,87 @@ async function callOpenRouter(prompt, modelId, apiKey, type) {
   return { text, provider: 'openrouter', modelId }
 }
 
+// ── Error classification ─────────────────────────────────
+function classifyError(error, provider) {
+  // Errors with no upstream response are local/backend issues (code).
+  if (!error.response) {
+    if (error.code === 'ECONNABORTED') {
+      return { httpStatus: 504, code: 'UPSTREAM_TIMEOUT', kind: 'provider', message: `Upstream ${provider} timed out`, retriable: true }
+    }
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'EAI_AGAIN') {
+      return { httpStatus: 502, code: 'UPSTREAM_UNAVAILABLE', kind: 'provider', message: `Cannot reach ${provider}: ${error.code}`, retriable: true }
+    }
+    if (/missing .*_api_key/i.test(error.message)) {
+      return { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: error.message, retriable: false }
+    }
+    return { httpStatus: 500, code: 'INTERNAL_ERROR', kind: 'code', message: error.message, retriable: false }
+  }
+
+  const status = error.response.status
+  const body = error.response.data
+  if (status === 401 || status === 403) {
+    return { httpStatus: 401, code: 'INVALID_API_KEY', kind: 'code', message: `${provider} rejected the API key (${status})`, providerStatus: status, providerBody: body, retriable: false }
+  }
+  if (status === 429) {
+    return { httpStatus: 429, code: 'RATE_LIMITED', kind: 'provider', message: `${provider} rate limited the request`, providerStatus: status, providerBody: body, retriable: true }
+  }
+  if (status === 404) {
+    return { httpStatus: 404, code: 'MODEL_NOT_FOUND', kind: 'provider', message: `${provider} does not recognise model ${error.config?.modelId || ''}`, providerStatus: status, providerBody: body, retriable: true }
+  }
+  if (status === 400) {
+    return { httpStatus: 400, code: 'BAD_REQUEST', kind: 'provider', message: `${provider} rejected the request as malformed`, providerStatus: status, providerBody: body, retriable: false }
+  }
+  if (status >= 500) {
+    return { httpStatus: 502, code: 'UPSTREAM_UNAVAILABLE', kind: 'provider', message: `${provider} returned ${status}`, providerStatus: status, providerBody: body, retriable: true }
+  }
+  return { httpStatus: status, code: 'UPSTREAM_ERROR', kind: 'provider', message: `${provider} returned ${status}`, providerStatus: status, providerBody: body, retriable: false }
+}
+
 // ── Main AI endpoint ──────────────────────────────────────
 app.post('/api/ai', async (req, res) => {
-  try {
-    const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey } = req.body
-    const provider = resolveProvider(modelId)
-    console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | userKey: ${!!userApiKey}`)
+  const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey } = req.body
+  const provider = resolveProvider(modelId)
+  console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | userKey: ${!!userApiKey}`)
 
+  try {
     let result
 
     if (provider === 'openai') {
       const key = userApiKey || process.env.OPENAI_API_KEY
-      if (!key) throw new Error('Missing OPENAI_API_KEY')
+      if (!key) throw Object.assign(new Error('Missing OPENAI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENAI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callOpenAI(prompt, modelId, key, type)
     } else if (provider === 'anthropic') {
       const key = userApiKey || process.env.ANTHROPIC_API_KEY
-      if (!key) throw new Error('Missing ANTHROPIC_API_KEY')
+      if (!key) throw Object.assign(new Error('Missing ANTHROPIC_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'ANTHROPIC_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callAnthropic(prompt, modelId, key, type)
     } else if (provider === 'google') {
       const key = userApiKey || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
-      if (!key) throw new Error('Missing GOOGLE_GEMINI_API_KEY')
+      if (!key) throw Object.assign(new Error('Missing GOOGLE_GEMINI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'GOOGLE_GEMINI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callGoogleGemini(prompt, modelId, key, type)
     } else if (provider === 'openrouter') {
       const key = userApiKey || process.env.OPENROUTER_API_KEY
-      if (!key) throw new Error('Missing OPENROUTER_API_KEY')
+      if (!key) throw Object.assign(new Error('Missing OPENROUTER_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENROUTER_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callOpenRouter(prompt, modelId, key, type)
     } else {
-      throw new Error(`Unsupported provider: ${provider}`)
+      throw Object.assign(new Error(`Unsupported provider: ${provider}`), { _classified: { httpStatus: 400, code: 'UNSUPPORTED_PROVIDER', kind: 'code', message: `Unsupported provider for model ${modelId}` } })
     }
 
     res.json(result)
   } catch (error) {
-    console.error('[ERROR] AI API error:', error.message)
-    console.error('[ERROR] Full error details:', {
-      message: error.message,
-      code: error.code,
-      config: error.config?.url,
-      response: error.response?.data,
-      status: error.response?.status
-    })
-    res.status(500).json({
-      error: 'AI provider request failed',
-      detail: error.message,
-      providerError: error.response?.data || null
+    const classified = error._classified || classifyError(error, provider)
+    console.error('[ERROR] AI API error:', classified.code, '-', classified.message)
+    if (classified.providerBody) {
+      console.error('[ERROR] Provider response:', JSON.stringify(classified.providerBody).slice(0, 500))
+    }
+    res.status(classified.httpStatus).json({
+      error: classified.message,
+      code: classified.code,
+      kind: classified.kind,
+      provider,
+      modelId,
+      retriable: classified.retriable,
+      providerStatus: classified.providerStatus || null,
+      detail: classified.providerBody || null,
     })
   }
 })

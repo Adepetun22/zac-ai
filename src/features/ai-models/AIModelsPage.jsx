@@ -285,9 +285,16 @@ export default function AIModelsPage() {
   const handleRun = async (model) => {
     try {
       const response = await generateAIResponse("Say hello in a professional manner", model.id);
-      addNotification(`Test response from ${model.name}: ${response.substring(0, 80)}...`, 'info');
+      const preview = typeof response === 'string'
+        ? response.substring(0, 80)
+        : JSON.stringify(response).substring(0, 80);
+      addNotification(`Test response from ${model.name}: ${preview}...`, 'info');
     } catch (err) {
-      addNotification(`Error running ${model.name}: ${err.message}`, 'error');
+      // AIService now throws AIError with .kind ('code'|'provider') and .code.
+      // Surface a clear message and use the right notification variant so the user
+      // can tell whether to fix their config or just try again.
+      const isCodeError = err?.kind === 'code'
+      addNotification(`Error running ${model.name}: ${err.message}${isCodeError ? ' (configuration)' : ''}`, isCodeError ? 'error' : 'warning');
     }
   };
 

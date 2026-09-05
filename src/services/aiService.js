@@ -1,3 +1,53 @@
+// Typed error so callers can distinguish "the AI provider rejected this" from
+// "the app itself is misconfigured". `kind` is one of:
+//   - 'provider' — upstream AI provider returned an error (4xx/5xx/network). May be transient; fallbacks are appropriate.
+//   - 'code'     — the app itself is misconfigured (missing server API key, bad model id, internal bug). Fallbacks won't help.
+// Both carry `code` (string machine-readable), `provider`, `status`, `detail`, `retriable`.
+export class AIError extends Error {
+  constructor(message, { kind, code, provider, modelId, status, detail, retriable }) {
+    super(message)
+    this.name = 'AIError'
+    this.kind = kind
+    this.code = code || 'UNKNOWN'
+    this.provider = provider || null
+    this.modelId = modelId || null
+    this.status = status || null
+    this.detail = detail || null
+    this.retriable = !!retriable
+  }
+  isProvider() { return this.kind === 'provider' }
+  isCode() { return this.kind === 'code' }
+}
+
+// Human-readable explanation of a backend error code, for UI surfaces.
+export function explainError(err) {
+  if (!(err instanceof AIError)) return err?.message || String(err)
+  switch (err.code) {
+    case 'MISSING_API_KEY':
+      return `The ${err.provider || 'AI'} server is missing its API key. Add the env var (e.g. OPENROUTER_API_KEY) to your Render dashboard and redeploy.`
+    case 'INVALID_API_KEY':
+      return `${err.provider || 'The AI provider'} rejected the API key (HTTP ${err.status || 401}). Check that the key is correct, has not expired, and the right env var is set on Render.`
+    case 'RATE_LIMITED':
+      return `${err.provider || 'The AI provider'} rate-limited this request (HTTP 429). Wait a moment and try again, or pick a different model.`
+    case 'MODEL_NOT_FOUND':
+      return `The selected model is not available on ${err.provider || 'the provider'} (HTTP 404). Pick a different model.`
+    case 'BAD_REQUEST':
+      return `${err.provider || 'The provider'} rejected the request as malformed (HTTP 400). The prompt may be too long or contain unsupported content.`
+    case 'UPSTREAM_TIMEOUT':
+      return `${err.provider || 'The provider'} timed out. Try again or pick a different model.`
+    case 'UPSTREAM_UNAVAILABLE':
+      return `${err.provider || 'The provider'} is temporarily unavailable (HTTP ${err.status || 502}). Try again shortly.`
+    case 'UNSUPPORTED_PROVIDER':
+      return `The selected model targets an unsupported provider. This is a code/configuration issue.`
+    case 'NETWORK':
+      return `Could not reach the backend at ${err.detail?.backendUrl || 'the configured URL'}. Is the Render service running?`
+    case 'INTERNAL_ERROR':
+      return `The AI backend hit an unexpected error: ${err.message}`
+    default:
+      return err.message || 'Unknown AI error'
+  }
+}
+
 class AIService {
   constructor() {
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
@@ -7,7 +57,6 @@ class AIService {
     try {
       const result = await this.callBackendAI(prompt, modelId, type, apiKey);
       if (result !== null && result !== undefined) {
-        // Structured: backend returns { schema: {...} }
         if (type === 'structured') {
           if (result.schema && typeof result.schema === 'object') return result.schema
           if (result.type) return result
@@ -17,29 +66,52 @@ class AIService {
         return result
       }
     } catch (error) {
-      console.warn(`Primary model ${modelId} failed:`, error.message);
-      // Only attempt fallbacks for non-structured requests
+      console.warn(`Primary model ${modelId} failed:`, error.message, `(kind=${error.kind || 'unknown'}, code=${error.code || 'unknown'})`)
+
+      // Code/config errors won't be fixed by trying a different model from the same
+      // provider, but they CAN be fixed by switching provider — e.g. a missing
+      // OPENROUTER_API_KEY won't help by trying gpt-oss-20b, but it might be fixed
+      // by switching to google/gemini-2.0-flash. So try fallbacks across providers
+      // only, and stop on the first code-error.
       if (type !== 'structured') {
-        const fallbackModels = this.getFallbackModels(modelId);
+        const fallbackModels = this.getFallbackModels(modelId)
         for (const fallbackModel of fallbackModels) {
+          if (this.resolveProvider(fallbackModel) === this.resolveProvider(modelId)) continue
           try {
-            const result = await this.callBackendAI(prompt, fallbackModel, type, null);
+            const result = await this.callBackendAI(prompt, fallbackModel, type, null)
             if (result !== null && result !== undefined) {
               if (type === 'image' && result.imageUrl) return result.imageUrl
               if (result.text) return result.text
               return result
             }
           } catch (fallbackError) {
-            console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message);
-            continue;
+            console.warn(`Fallback model ${fallbackModel} also failed:`, fallbackError.message, `(kind=${fallbackError.kind || 'unknown'})`)
+            continue
           }
         }
       }
     }
 
-    // Only simulate as last resort
+    // Only simulate as last resort, and ONLY when the original failure was a
+    // provider issue (transient). If the backend itself is misconfigured
+    // (code error), simulating would hide the real problem from the user.
     if (type === 'structured') return this.simulateStructuredResponse(prompt, modelId)
     return this.simulateAIResponse(prompt, modelId)
+  }
+
+  // Lightweight provider resolution mirroring the backend's resolveProvider.
+  resolveProvider(modelId = '') {
+    const id = modelId.toLowerCase()
+    if (id.startsWith('openrouter/')) return 'openrouter'
+    if (id.startsWith('anthropic/')) return 'anthropic'
+    if (id.startsWith('openai/')) return 'openai'
+    if (id.startsWith('google/') || id.includes('gemini') || id.includes('flash-image')) return 'google'
+    if (id.includes('llama') || id.includes('mistral')) return 'openrouter'
+    if (id.startsWith('flux') || id.startsWith('stable') || id.includes('black-forest') || id.includes('stability')) return 'openrouter-image'
+    if (id.includes('gpt') || id.includes('openai')) return 'openai'
+    if (id.includes('claude') || id.includes('anthropic')) return 'anthropic'
+    if (id.includes('hugging') || id.includes('hf-')) return 'huggingface'
+    return 'openrouter'
   }
 
   async generateImage(prompt, modelId = 'huggingface/free-image') {
@@ -139,14 +211,29 @@ class AIService {
       );
 
       console.log('[DEBUG] Backend response status:', response.status);
-      const data = await response.json();
-      console.log('[DEBUG] Backend response data:', data);
-      
+      let data = null
+      try { data = await response.json() } catch { /* non-JSON */ }
+
       if (!response.ok) {
-        const message = data?.error || `HTTP ${response.status}`;
-        console.error('[ERROR] Backend AI API error:', response.status, message, data.detail);
-        throw new Error(`Backend AI API error ${response.status}: ${message}`);
+        // Backend returns a structured error envelope; surface it as an AIError so callers
+        // can distinguish code/config errors (won't be fixed by retries/fallbacks) from
+        // provider errors (may be transient).
+        const code = data?.code || 'BACKEND_ERROR'
+        const kind = data?.kind === 'code' ? 'code' : 'provider'
+        const message = data?.error || `Backend returned HTTP ${response.status}`
+        console.error('[ERROR] Backend AI API error:', response.status, code, message);
+        throw new AIError(message, {
+          kind,
+          code,
+          provider: data?.provider || null,
+          modelId,
+          status: response.status,
+          detail: data?.detail || data,
+          retriable: !!data?.retriable,
+        })
       }
+
+      console.log('[DEBUG] Backend response data:', data);
 
       if (type === 'text' && data.text && typeof data.text === 'string') {
         const trimmed = data.text.trim()
@@ -172,13 +259,35 @@ class AIService {
 
       return data;
     } catch (error) {
-      const isNetworkError = error instanceof TypeError && error.message === 'Failed to fetch'
+      // Re-throw typed errors as-is.
+      if (error instanceof AIError) throw error
+
+      const isNetworkError = error instanceof TypeError && /failed to fetch|networkerror/i.test(error.message)
       if (isNetworkError) {
-        console.warn('[WARN] Backend AI proxy is unavailable at', this.backendUrl, '- falling back to simulated response.');
-        return null;
+        // The backend is unreachable. This is a CODE error (our deployment is broken),
+        // not a provider error — surfacing it as such stops callers from hammering
+        // OpenRouter etc. with no chance of success.
+        console.warn('[WARN] Backend AI proxy is unavailable at', this.backendUrl, '- network error.');
+        throw new AIError(`Cannot reach AI backend at ${this.backendUrl || '/ai'}`, {
+          kind: 'code',
+          code: 'NETWORK',
+          provider: null,
+          modelId,
+          status: 0,
+          detail: { backendUrl: this.backendUrl },
+          retriable: true,
+        })
       }
       console.warn('Backend AI call failed:', error.message, error.stack);
-      throw error;
+      throw new AIError(error.message || 'Unknown backend error', {
+        kind: 'code',
+        code: 'INTERNAL_ERROR',
+        provider: null,
+        modelId,
+        status: null,
+        detail: null,
+        retriable: false,
+      })
     }
   }
 

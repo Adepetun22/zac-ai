@@ -2,48 +2,63 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { enterLiveblocksRoom } from '../config/liveblocks';
 
 /**
- * Custom hook for managing Liveblocks collaboration functionality
+ * Custom hook for managing Liveblocks collaboration functionality.
+ *
+ * Now tracks the connection status (`initializing` | `connecting` | `connected`
+ * | `disconnected` | `auth-error` | `error`) so the UI can show a banner when
+ * Liveblocks is failing to authenticate, instead of silently showing "0 users".
+ *
  * @param {string} roomId - The ID of the Liveblocks room to join
  */
 export const useLiveblocks = (roomId, currentUser = null) => {
-  const [roomData, setRoomData] = useState({ room: null, users: [], others: [], cursor: null, error: null });
+  const [roomData, setRoomData] = useState({
+    room: null,
+    users: [],
+    others: [],
+    cursor: null,
+    error: null,
+    status: 'initializing',
+  });
   const mountedRef = useRef(true);
   const lastOthersUpdateRef = useRef(0); // Track last update time to prevent excessive updates
 
-  // Normalize the "others" payload into a plain array regardless of shape
-  const toOthersArray = (others) => {
-    if (!others) return [];
-    if (typeof others.toArray === 'function') return others.toArray();
-    if (Array.isArray(others)) return others;
-    return Array.from(others);
-  };
-
-  // Join the room when component mounts
   useEffect(() => {
     mountedRef.current = true;
 
+    let unsubscribeOthers = () => {};
+    let unsubscribeStatus = () => {};
+    let leave = () => {};
+
     try {
-      const { room: liveblocksRoom, leave } = enterLiveblocksRoom(roomId);
+      const entered = enterLiveblocksRoom(roomId);
+      const liveblocksRoom = entered.room;
+      leave = entered.leave || (() => {});
 
       if (mountedRef.current) {
-        setRoomData(prev => ({ ...prev, room: liveblocksRoom }));
+        setRoomData(prev => ({ ...prev, room: liveblocksRoom, status: 'connecting' }));
 
-        // Publish our identity so other users see a real name instead of "User <id>"
         if (currentUser?.name) {
           liveblocksRoom.updatePresence({ name: currentUser.name, userId: currentUser.id });
         }
 
-        // Subscribe to other users in the room
-        const unsubscribeOthers = liveblocksRoom.subscribe('others', (others) => {
-          // Debounce updates to prevent excessive renders
+        // Track connection status so the UI can show "Liveblocks: not connected"
+        // when auth fails (token mint endpoint missing, secret key missing, etc).
+        unsubscribeStatus = liveblocksRoom.subscribe('status', (status) => {
+          if (!mountedRef.current) return;
+          // status: 'connected' | 'connecting' | 'disconnected' | 'reconnecting'
+          const mapped = status === 'connected' ? 'connected'
+            : status === 'disconnected' ? 'disconnected'
+            : 'connecting'
+          setRoomData(prev => ({ ...prev, status: mapped, error: status === 'disconnected' ? prev.error : null }))
+        })
+
+        unsubscribeOthers = liveblocksRoom.subscribe('others', (others) => {
           const now = Date.now();
-          if (now - lastOthersUpdateRef.current < 100) { // 100ms debounce
-            return;
-          }
+          if (now - lastOthersUpdateRef.current < 100) return;
           lastOthersUpdateRef.current = now;
 
           if (mountedRef.current) {
-            const othersArray = toOthersArray(others);
+            const othersArray = toothersArrayInner(others);
             setRoomData(prev => ({
               ...prev,
               others: othersArray,
@@ -54,30 +69,47 @@ export const useLiveblocks = (roomId, currentUser = null) => {
                 cursor: user.presence.cursor,
                 selection: user.presence.selection,
               })),
-              otherUserCount: othersArray.length
+              otherUserCount: othersArray.length,
+              status: prev.status === 'initializing' || prev.status === 'connecting' ? 'connected' : prev.status,
             }));
           }
         });
 
-        // Cleanup function
-        return () => {
-          unsubscribeOthers();
-          leave();
-          mountedRef.current = false;
-        };
+        // Surface auth errors thrown by authEndpoint so the UI can tell the user
+        // to fix their backend config (missing LIVEBLOCKS_SECRET_KEY, etc.) instead
+        // of a silent "0 collaborators" forever.
+        if (typeof liveblocksRoom.subscribe === 'function') {
+          const unsubscribeError = liveblocksRoom.subscribe('error', (err) => {
+            if (!mountedRef.current) return;
+            const message = err?.message || String(err)
+            console.error('[Liveblocks] room error:', message)
+            const isAuthError = /forbidden|unauthor/i.test(message)
+            setRoomData(prev => ({
+              ...prev,
+              status: isAuthError ? 'auth-error' : 'error',
+              error: message,
+            }))
+          })
+          const previousStatus = unsubscribeStatus
+          unsubscribeStatus = () => { previousStatus(); unsubscribeError() }
+        }
       }
     } catch (err) {
       console.error('Error entering Liveblocks room:', err);
       if (mountedRef.current) {
         setRoomData(prev => ({
           ...prev,
-          error: err.message
+          status: 'error',
+          error: err?.message || String(err),
         }));
       }
     }
 
     return () => {
       mountedRef.current = false;
+      unsubscribeOthers();
+      unsubscribeStatus();
+      try { leave() } catch { /* ignore */ }
     };
   }, [roomId, currentUser?.name]);
 
@@ -119,6 +151,7 @@ export const useLiveblocks = (roomId, currentUser = null) => {
     otherUserCount: roomData.others.length,
     cursor: roomData.cursor,
     error: roomData.error,
+    status: roomData.status,
     updateCursor,
     updateName,
     updateSelection,
@@ -127,3 +160,11 @@ export const useLiveblocks = (roomId, currentUser = null) => {
     isLiveblocksEnabled: !!roomData.room,
   };
 };
+
+// Internal helper, defined outside the component so it can be hoisted.
+function toothersArrayInner(others) {
+  if (!others) return [];
+  if (typeof others.toArray === 'function') return others.toArray();
+  if (Array.isArray(others)) return others;
+  return Array.from(others);
+}
