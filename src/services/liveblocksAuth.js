@@ -24,7 +24,8 @@ export async function getSupabaseAccessToken() {
  * The same shape is reused by `LiveblocksProvider` for `@liveblocks/react`.
  */
 export function createLiveblocksAuthEndpoint({ backendUrl } = {}) {
-  const base = backendUrl || (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+  const raw = backendUrl || (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+  const base = raw.replace(/\/api$/, '')
   const url = base ? `${base}/api/liveblocks-auth` : '/api/liveblocks-auth'
 
   return async (room) => {
