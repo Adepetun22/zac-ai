@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+﻿import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus, Download } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -14,15 +14,10 @@ import useCollaborationStore from '../../store/collaborationStore'
 import useDashboardStore from '../../store/dashboardStore'
 import { useNotification } from '../../components/useNotification'
 import AIService, { AIError, explainError } from '../../services/aiService'
+import { useAIStore } from '../../store/aiStore'
 
-// Built-in free models always available (no API key needed)
-const FREE_MODELS = [
-  { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter' },
-  { id: 'openrouter/openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (Free)', provider: 'OpenRouter' },
-  { id: 'openrouter/cohere/north-mini-code:free', name: 'North Mini Code (Free)', provider: 'OpenRouter' },
-  { id: 'openrouter/poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (Free)', provider: 'OpenRouter' },
-  { id: 'huggingface/free-image', name: 'Free Image Gen (HF)', provider: 'HuggingFace', isImage: true },
-]
+// Built-in free models — kept for image model detection only; model list comes from aiStore
+const IMAGE_MODEL_IDS = ['huggingface/free-image']
 
 const PEER_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
@@ -53,39 +48,68 @@ function getPeerColor(id) {
 const CHART_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
 
 // ─── AI Integration ────────────────────────────────────────────────────────────
-async function processAIRequest(prompt, modelId, apiKey = null) {
+function unpackToolResult(toolResult, modelId) {
+  if (!toolResult) return null
+  if (toolResult.type === 'widget' && toolResult.schema) return { ...toolResult.schema, model: modelId }
+  if (toolResult.type === 'action') return { type: 'text', title: toolResult.message, model: modelId, content: toolResult.message, actionData: toolResult.data }
+  return null
+}
+
+async function processAIRequest(prompt, modelId, apiKey = null, messages = [], tools = null) {
   try {
     const p = prompt.toLowerCase()
     const isImageModel = modelId.includes('FLUX') || modelId.includes('stable') || modelId.includes('flux') || modelId.includes('pollinations') || modelId.includes('free-image') || modelId.includes('huggingface')
     const isImagePrompt = p.includes('image') || p.includes('picture') || p.includes('photo') || p.includes('draw') || p.includes('illustration') || p.includes('generate an image') || p.includes('create an image')
     const isChartPrompt = p.includes('chart') || p.includes('graph') || p.includes('plot') || p.includes('revenue') || p.includes('trend') || p.includes('breakdown') || p.includes('distribution') || p.includes('table') || p.includes('usage') || p.includes('sales') || p.includes('quarter')
+    const isSpreadsheetPrompt = p.includes('spreadsheet') || p.includes('grid') || p.includes('data grid') || p.includes('data table') || p.includes('list of') || p.includes('show data') || p.includes('report')
+    const isEmailPrompt = p.includes('email') || p.includes('send') || p.includes('mail')
+    const isCalendarPrompt = p.includes('calendar') || p.includes('schedule') || p.includes('meeting') || p.includes('event') || p.includes('remind') || p.includes('appointment')
 
     if (isImageModel || isImagePrompt) {
       if (isImageModel) {
         const imageUrl = await AIService.generateImage(prompt, modelId)
         if (imageUrl) return { type: 'image', title: prompt.slice(0, 40), model: modelId, imageUrl }
-      } else {
-        return { type: 'text', title: 'Image generation not supported', model: modelId, content: `The selected model (${modelId}) does not support image generation.` }
       }
+      return { type: 'text', title: 'Image generation not supported', model: modelId, content: `The selected model (${modelId}) does not support image generation.` }
     }
 
+    // Helper: unpack any AI response object into a canvas schema
+    const unpack = (result) => {
+      if (!result || typeof result !== 'object') return null
+      if (result.toolResults?.length > 0) {
+        const unpacked = unpackToolResult(result.toolResults[0], modelId)
+        if (unpacked) return unpacked
+      }
+      if (result.type) return { ...result, model: result.model || modelId }
+      if (result.schema?.type) return { ...result.schema, model: modelId }
+      return null
+    }
+
+    // Spreadsheet / email / calendar → always use tool calling
+    if ((isSpreadsheetPrompt || isEmailPrompt || isCalendarPrompt) && tools) {
+      const result = await AIService.generateResponse(prompt, modelId, 'text', apiKey, messages, tools)
+      const unpacked = unpack(result)
+      if (unpacked) return unpacked
+      const text = typeof result === 'string' ? result : result?.text
+      return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: text || String(result) }
+    }
+
+    // Chart prompts → structured JSON response
     if (isChartPrompt) {
-      const structured = await AIService.generateResponse(prompt, modelId, 'structured', apiKey)
-      if (structured && typeof structured === 'object' && structured.type) {
-        // Ensure model field is set
-        return { ...structured, model: structured.model || modelId }
-      }
+      const structured = await AIService.generateResponse(prompt, modelId, 'structured', apiKey, messages, tools)
+      const unpacked = unpack(structured)
+      if (unpacked) return unpacked
+      if (typeof structured === 'string') return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: structured }
     }
 
-    const aiResponse = await AIService.generateResponse(prompt, modelId, 'text', apiKey)
-    if (typeof aiResponse === 'string') {
-      return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse }
-    }
-    if (typeof aiResponse === 'object' && aiResponse !== null) {
-      if (aiResponse.type) return { ...aiResponse, model: aiResponse.model || modelId }
-      if (aiResponse.text) return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse.text }
-    }
-    return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: String(aiResponse) }
+    // General text response
+    const aiResponse = await AIService.generateResponse(prompt, modelId, 'text', apiKey, messages, tools)
+    if (typeof aiResponse === 'string') return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse }
+    const unpacked = unpack(aiResponse)
+    if (unpacked) return unpacked
+    const text = aiResponse?.text
+    return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: text || String(aiResponse) }
+
   } catch (error) {
     console.error('AI processing error:', error)
     const heading = error instanceof AIError
@@ -93,10 +117,7 @@ async function processAIRequest(prompt, modelId, apiKey = null) {
       : 'Unexpected error'
     const detail = error instanceof AIError ? explainError(error) : error.message
     return {
-      type: 'text',
-      title: heading,
-      model: modelId,
-      error: true,
+      type: 'text', title: heading, model: modelId, error: true,
       errorKind: error instanceof AIError ? error.kind : 'code',
       errorCode: error instanceof AIError ? error.code : 'UNKNOWN',
       content: `${detail}\n\nModel: ${modelId}`,
@@ -105,6 +126,115 @@ async function processAIRequest(prompt, modelId, apiKey = null) {
 }
 
 // ─── Widget Renderers ─────────────────────────────────────────────────────────
+function SpreadsheetWidget({ schema }) {
+  const cols = schema.columns || []
+  const rows = schema.rows || []
+  return (
+    <div className="overflow-auto" style={{ maxHeight: 280 }}>
+      <table className="border-collapse text-xs" style={{ minWidth: '100%' }}>
+        <thead>
+          <tr>
+            <th className="w-7 px-1 py-1.5 text-center font-normal border-r border-b" style={{ backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-muted)', borderColor: 'var(--color-border-subtle)' }} />
+            {cols.map((col, ci) => (
+              <th key={ci} className="px-3 py-1.5 font-semibold text-center border-r border-b whitespace-nowrap" style={{ backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-secondary)', borderColor: 'var(--color-border-subtle)', minWidth: 90 }}>
+                {String.fromCharCode(65 + ci)}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            <td className="px-1 py-1.5 text-center border-r border-b" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-muted)', fontSize: 10 }}>1</td>
+            {cols.map((col, ci) => (
+              <td key={ci} className="px-3 py-1.5 font-semibold border-r border-b whitespace-nowrap" style={{ backgroundColor: 'var(--color-brand-500)', color: '#fff', borderColor: 'var(--color-border-subtle)' }}>{col}</td>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri}>
+              <td className="px-1 py-1.5 text-center border-r border-b" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-muted)', fontSize: 10 }}>{ri + 2}</td>
+              {row.map((cell, ci) => (
+                <td key={ci} className="px-3 py-1.5 border-r border-b whitespace-nowrap" style={{ color: 'var(--color-text-primary)', borderColor: 'var(--color-border-subtle)', backgroundColor: ri % 2 === 0 ? 'var(--color-bg-surface)' : 'var(--color-bg-canvas)' }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CalendarWidget({ schema }) {
+  const { summary, start, end, location, description, ics } = schema
+  const startDate = start ? new Date(start) : new Date()
+  const endDate = end ? new Date(end) : startDate
+
+  const year = startDate.getFullYear()
+  const month = startDate.getMonth()
+  const eventDay = startDate.getDate()
+
+  const monthName = startDate.toLocaleString('default', { month: 'long' })
+  const firstDow = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  const cells = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+
+  const fmt = (iso) => {
+    try { return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) }
+    catch { return iso }
+  }
+
+  const downloadIcs = () => {
+    if (!ics) return
+    const blob = new Blob([ics], { type: 'text/calendar' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${summary || 'event'}.ics`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Month grid */}
+      <div>
+        <p className="text-xs font-semibold text-center mb-2" style={{ color: 'var(--color-text-secondary)' }}>{monthName} {year}</p>
+        <div className="grid grid-cols-7 gap-px text-center">
+          {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+            <div key={d} className="text-xs font-medium py-0.5" style={{ color: 'var(--color-text-muted)' }}>{d}</div>
+          ))}
+          {cells.map((day, i) => (
+            <div key={i} className={`text-xs py-1 rounded-md font-medium ${
+              day === eventDay
+                ? 'text-white'
+                : 'text-[var(--color-text-secondary)]'
+            }`}
+            style={day === eventDay ? { backgroundColor: 'var(--color-brand-500)' } : {}}>
+              {day || ''}
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Event details */}
+      <div className="rounded-lg p-3 space-y-1" style={{ backgroundColor: 'var(--color-bg-canvas)', border: '1px solid var(--color-border-subtle)' }}>
+        <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{summary}</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {startDate.toLocaleDateString(undefined, { dateStyle: 'medium' })} · {fmt(start)} – {fmt(end)}
+        </p>
+        {location && <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>📍 {location}</p>}
+        {description && <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>{description}</p>}
+      </div>
+      {ics && (
+        <button onClick={downloadIcs} className="w-full py-1.5 rounded-lg text-xs font-medium text-white cursor-pointer hover:opacity-80 transition-opacity" style={{ backgroundColor: 'var(--color-brand-500)' }}>
+          Download .ics
+        </button>
+      )}
+    </div>
+  )
+}
+
 function WidgetChart({ schema }) {
   if (schema.type === 'bar') return (
     <ResponsiveContainer width="100%" height={160}>
@@ -151,23 +281,47 @@ function WidgetChart({ schema }) {
       ))}
     </div>
   )
-  
-  if (schema.type === 'text') return (
-    <div className="p-2 text-sm text-slate-700 max-h-32 overflow-y-auto">
-      {schema.content}
+
+  if (schema.type === 'spreadsheet') return <SpreadsheetWidget schema={schema} />
+  if (schema.type === 'calendar') return <CalendarWidget schema={schema} />
+
+  if (schema.type === 'email') return (
+    <div className="space-y-2 text-sm">
+      <div className="flex items-start gap-2">
+        <Mail className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--color-brand-500)' }} />
+        <div className="min-w-0">
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>To</p>
+          <p className="font-medium text-sm" style={{ color: 'var(--color-text-primary)' }}>{schema.to}</p>
+          {schema.subject && <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Subject: {schema.subject}</p>}
+          {schema.sent === false && <p className="text-xs mt-1 text-amber-500">⚠️ Not sent — SMTP not configured</p>}
+          {schema.sent === true && <p className="text-xs mt-1 text-emerald-500">✓ Sent</p>}
+        </div>
+      </div>
     </div>
   )
 
   if (schema.type === 'image') return (
-    <div className="p-2">
-      <img src={schema.imageUrl} alt={schema.title} className="w-full h-auto rounded-lg border border-slate-100" />
+    <div>
+      <img src={schema.imageUrl} alt={schema.title} className="w-full h-auto rounded-lg border" style={{ borderColor: 'var(--color-border-subtle)' }} />
     </div>
   )
 
   return null
 }
 
-const TYPE_ICON = { bar: BarChart2, line: LineChart, pie: PieChart, table: Table2, image: ImageIcon }
+const TYPE_ICON = {
+  bar: BarChart2, line: LineChart, pie: PieChart, table: Table2,
+  image: ImageIcon, spreadsheet: FileSpreadsheet,
+  calendar: Calendar, email: Mail,
+}
+
+const WIDGET_WIDTH = {
+  spreadsheet: 'min-w-[380px] max-w-[560px]',
+  calendar: 'min-w-[260px] max-w-[300px]',
+  email: 'min-w-[240px] max-w-[320px]',
+  image: 'min-w-[200px] max-w-[320px]',
+  default: 'min-w-[200px] max-w-[300px]',
+}
 
 // ─── Draggable Widget ─────────────────────────────────────────────────────────
 function Widget({ widget, onMove, onRemove }) {
@@ -236,24 +390,22 @@ function Widget({ widget, onMove, onRemove }) {
     <div
       onMouseDown={onPointerDown}
       onTouchStart={onPointerDown}
-      className="absolute bg-white border border-slate-200 rounded-xl shadow-sm select-none touch-none
-        w-[85vw] max-w-[280px] sm:max-w-[300px] min-w-[200px] min-w-0
-        overflow-hidden"
-      style={{ left: widget.x, top: widget.y }}
+      className={`absolute border rounded-xl shadow-sm select-none touch-none w-[85vw] overflow-hidden ${WIDGET_WIDTH[widget.schema.type] || WIDGET_WIDTH.default}`}
+      style={{ left: widget.x, top: widget.y, backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border-subtle)' }}
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 cursor-grab active:cursor-grabbing">
+      <div className="flex items-center justify-between px-4 py-3 border-b cursor-grab active:cursor-grabbing" style={{ borderColor: 'var(--color-border-subtle)' }}>
         <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4 text-indigo-500" />
-          <span className="text-sm font-semibold text-slate-800 truncate max-w-[180px]">{widget.schema.title}</span>
+          <Icon className="w-4 h-4" style={{ color: 'var(--color-brand-500)' }} />
+          <span className="text-sm font-semibold truncate max-w-[220px]" style={{ color: 'var(--color-text-primary)' }}>{widget.schema.title}</span>
         </div>
         <div className="flex items-center gap-1">
           {widget.schema.type === 'image' && (
-            <button onClick={(e) => { e.stopPropagation(); handleDownload() }} className="p-1 hover:bg-slate-100 rounded cursor-pointer text-slate-400 hover:text-slate-600 transition-colors" title="Download image">
+            <button onClick={(e) => { e.stopPropagation(); handleDownload() }} className="p-1 rounded cursor-pointer transition-colors hover:opacity-70" style={{ color: 'var(--color-text-muted)' }} title="Download image">
               <Download className="w-3.5 h-3.5" />
             </button>
           )}
-          <GripVertical className="w-4 h-4 text-slate-300" />
-          <button onClick={() => onRemove(widget.id)} className="p-1 hover:bg-slate-100 rounded cursor-pointer text-slate-400 hover:text-slate-600 transition-colors">
+          <GripVertical className="w-4 h-4" style={{ color: 'var(--color-border-subtle)' }} />
+          <button onClick={() => onRemove(widget.id)} className="p-1 rounded cursor-pointer transition-colors hover:opacity-70" style={{ color: 'var(--color-text-muted)' }}>
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -276,14 +428,8 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   const bottomRef = useRef(null)
   const { addNotification } = useNotification()
 
-  // Merge user-configured active models with built-in free models
-  const { aiModels: userModels } = useDashboardStore()
-  const allModels = [
-    ...FREE_MODELS,
-    ...userModels
-      .filter(m => m.status === 'active' && m.model_id && !FREE_MODELS.find(f => f.id === m.model_id))
-      .map(m => ({ id: m.model_id, name: `${m.name} ★`, provider: m.provider, api_key: m.api_key }))
-  ]
+  // All models come from aiStore (built-in free + user-registered)
+  const { aiModels: allModels } = useAIStore()
 
   // Check backend status on mount
   useEffect(() => {
@@ -316,7 +462,13 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
 
     try {
       const selectedModel = allModels.find(m => m.id === selectedModelId)
-      const schema = await processAIRequest(text, selectedModelId, selectedModel?.api_key || null)
+      // Build conversation history from previous messages (exclude the just-added user message)
+      const history = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.text }))
+      // Tools available for this request
+      const toolNames = ['create_spreadsheet', 'create_chart', 'send_email', 'create_calendar_event']
+      const schema = await processAIRequest(text, selectedModelId, selectedModel?.api_key || null, history, toolNames)
 
       if (schema?.error) {
         const isCode = schema.errorKind === 'code'
@@ -327,15 +479,41 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
         return
       }
 
+      // Action results (email, calendar) → also add as a canvas widget
+      if (schema.actionData) {
+        setMessages(m => [...m, { role: 'assistant', text: schema.content, actionData: schema.actionData }])
+        // Build a canvas widget from the action data
+        const actionSchema = schema.actionData.ics
+          ? { type: 'calendar', title: schema.actionData.summary || 'Calendar Event', ...schema.actionData }
+          : schema.actionData.to
+            ? { type: 'email', title: `Email: ${schema.actionData.subject || schema.actionData.to}`, ...schema.actionData }
+            : null
+        if (actionSchema) onAddWidget(actionSchema)
+        const { recordRequest, recordConversation } = useAIStore.getState()
+        recordRequest(selectedModelId, schema.content)
+        recordConversation(selectedModelId, text, schema.content)
+        useDashboardStore.getState().computeMetrics()
+        return
+      }
+
       onAddWidget(schema)
       const modelName = selectedModel?.name || selectedModelId
 
       let aiResponseText = `Added "${schema.title}" to the canvas`
       if (schema.type === 'text') aiResponseText = schema.content
       else if (schema.type === 'image') aiResponseText = `Generated image: "${schema.title}" using ${modelName}.`
+      else if (schema.type === 'spreadsheet') aiResponseText = `Created spreadsheet "${schema.title}" using ${modelName}.`
+      else if (schema.type === 'calendar') aiResponseText = `Calendar event "${schema.title}" added to canvas.`
+      else if (schema.type === 'email') aiResponseText = `Email widget "${schema.title}" added to canvas.`
       else aiResponseText += ` as a ${schema.type} chart using ${modelName}.`
 
       setMessages(m => [...m, { role: 'assistant', text: aiResponseText, schema }])
+
+      // Record into aiStore for metrics + Recent Activity
+      const { recordRequest, recordConversation } = useAIStore.getState()
+      recordRequest(selectedModelId, aiResponseText)
+      recordConversation(selectedModelId, text, aiResponseText)
+      useDashboardStore.getState().computeMetrics()
     } catch (error) {
       console.error('Error processing AI request:', error)
       setMessages(m => [...m, { role: 'assistant', text: 'Sorry, I encountered an unexpected error. Try changing the model or simplifying your request.' }])
@@ -347,9 +525,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--color-bg-surface)' }}>
       <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-          <Bot className="w-4 h-4 text-white" />
-        </div>
+        <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
         <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Prompt</span>
         <div className="ml-auto relative">
           <select
@@ -464,9 +640,7 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
       >
         <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              <UserPlus className="w-4 h-4 text-white" />
-            </div>
+            <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Invite Collaborators</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">
@@ -541,9 +715,7 @@ function ModelExplainerModal({ onClose }) {
       >
         <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-brand-500)' }}>
-              <Bot className="w-4 h-4 text-white" />
-            </div>
+            <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Models Overview</h3>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">
@@ -1102,7 +1274,6 @@ export default function CollaborationPage() {
           </div>
         )}
 
-        {/* Widgets - only render Image and Chart cards, no text cards */}
         {uniqueWidgets(widgets).filter(w => w.schema.type !== 'text').map(w => (
           <Widget key={w.id} widget={w} onMove={moveWidget} onRemove={removeWidget} />
         ))}

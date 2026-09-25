@@ -60,7 +60,7 @@ const PROVIDER_MODEL_IDS = {
   OpenAI: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4', 'openai/gpt-3.5-turbo'],
   Anthropic: ['anthropic/claude-3-5-sonnet-latest', 'anthropic/claude-3-opus-latest', 'anthropic/claude-3-haiku-20240307', 'anthropic/claude-3-5-haiku-latest'],
   Google: ['google/gemini-2.0-flash', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro'],
-  OpenRouter: ['openrouter/google/gemma-4-26b-a4b-it:free', 'openrouter/openai/gpt-oss-20b:free', 'openrouter/meta-llama/llama-3.1-70b-instruct:free', 'openrouter/mistralai/mistral-large'],
+  OpenRouter: ['openrouter/google/gemma-4-26b-a4b-it:free', 'openrouter/meta-llama/llama-3.1-70b-instruct:free', 'openrouter/mistralai/mistral-large'],
   Meta: ['openrouter/meta-llama/llama-3.1-70b-instruct:free', 'openrouter/meta-llama/llama-3.1-8b-instruct:free'],
   'Mistral AI': ['openrouter/mistralai/mistral-large', 'openrouter/mistralai/mistral-7b-instruct:free'],
   HuggingFace: ['huggingface/free-image'],

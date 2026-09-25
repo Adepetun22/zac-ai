@@ -31,7 +31,7 @@ const Sidebar = ({ isSidebarOpen, toggleSidebar, liveblocksStatus = null }) => {
         aria-label="Main navigation"
       >
         <div className="h-16 flex items-center px-5 border-b border-slate-700/60">
-          <span className="w-7 h-7 rounded-lg flex items-center justify-center mr-3 bg-[var(--color-brand-500)] text-white text-sm font-bold">Z</span>
+          <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-9 h-9 rounded-lg object-cover mr-3" />
           <h1 className="text-lg font-bold text-white">Zac AI Dashboard</h1>
         </div>
 

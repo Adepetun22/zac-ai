@@ -53,15 +53,17 @@ class AIService {
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   }
 
-  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey = null) {
+  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey = null, messages = [], tools = null) {
     try {
-      const result = await this.callBackendAI(prompt, modelId, type, apiKey);
+      const result = await this.callBackendAI(prompt, modelId, type, apiKey, messages, tools);
       if (result !== null && result !== undefined) {
         if (type === 'structured') {
           if (result.schema && typeof result.schema === 'object') return result.schema
           if (result.type) return result
         }
         if (type === 'image' && result.imageUrl) return result.imageUrl
+        // Preserve toolResults — return the full object so processAIRequest can handle them
+        if (result.toolResults && result.toolResults.length > 0) return result
         if (result.text) return result.text
         return result
       }
@@ -76,14 +78,16 @@ class AIService {
 
       // Provider errors (RATE_LIMITED, UPSTREAM_UNAVAILABLE, MODEL_NOT_FOUND,
       // BAD_REQUEST, UPSTREAM_TIMEOUT) may be transient. Try other providers in
-      // the fallback chain, but skip ones from the same provider — they share
-      // the same API key and will fail identically.
+      // the fallback chain. For MODEL_NOT_FOUND and RATE_LIMITED, also allow
+      // same-provider fallbacks because those are often model-specific rather
+      // than provider-wide.
       if (type !== 'structured') {
         const fallbackModels = this.getFallbackModels(modelId)
+        const isModelSpecificError = error?.code === 'MODEL_NOT_FOUND' || error?.code === 'RATE_LIMITED'
         for (const fallbackModel of fallbackModels) {
-          if (this.resolveProvider(fallbackModel) === this.resolveProvider(modelId)) continue
+          if (!isModelSpecificError && this.resolveProvider(fallbackModel) === this.resolveProvider(modelId)) continue
           try {
-            const result = await this.callBackendAI(prompt, fallbackModel, type, null)
+            const result = await this.callBackendAI(prompt, fallbackModel, type, null, messages, tools)
             if (result !== null && result !== undefined) {
               if (type === 'image' && result.imageUrl) return result.imageUrl
               if (result.text) return result.text
@@ -155,6 +159,27 @@ class AIService {
 
   simulateStructuredResponse(prompt, modelId) {
     const p = prompt.toLowerCase()
+    if (p.includes('spreadsheet') || p.includes('data table') || p.includes('list of') || p.includes('report') || p.includes('data grid')) {
+      return {
+        type: 'spreadsheet', title: 'Sample Data', model: modelId,
+        columns: ['Name', 'Value', 'Status'],
+        rows: [['Item A', '1,200', 'Active'], ['Item B', '850', 'Pending'], ['Item C', '2,400', 'Active']],
+      }
+    }
+    if (p.includes('calendar') || p.includes('schedule') || p.includes('meeting') || p.includes('event') || p.includes('appointment')) {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 10, 0)
+      const end = new Date(start.getTime() + 60 * 60 * 1000)
+      return {
+        type: 'calendar', title: 'Scheduled Event', model: modelId,
+        summary: prompt.slice(0, 50),
+        start: start.toISOString(),
+        end: end.toISOString(),
+        location: '',
+        description: '(Simulated — backend not connected)',
+        ics: null,
+      }
+    }
     if (p.includes('q3') || p.includes('quarter') || p.includes('revenue') || p.includes('sales')) {
       return {
         type: 'bar', title: 'Q3 Revenue Summary', model: modelId,
@@ -202,11 +227,13 @@ class AIService {
     }
   }
 
-  async callBackendAI(prompt, modelId, type = 'text', apiKey = null) {
+  async callBackendAI(prompt, modelId, type = 'text', apiKey = null, messages = [], tools = null) {
     try {
       console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
       const body = { prompt, modelId, type }
       if (apiKey) body.apiKey = apiKey
+      if (messages && messages.length > 0) body.messages = messages
+      if (tools && tools.length > 0) body.tools = tools
       const response = await fetch(
         this.backendUrl ? `${this.backendUrl}/ai` : '/ai',
         {
@@ -335,35 +362,29 @@ class AIService {
       'google/gemini-2.0-flash': [
         'google/gemini-2.0-pro',
         'openrouter/google/gemma-4-26b-a4b-it:free',
-        'openrouter/openai/gpt-oss-20b:free'
-      ],
-      'openrouter/openai/gpt-oss-20b:free': [
-        'openrouter/google/gemma-4-26b-a4b-it:free',
         'openrouter/cohere/north-mini-code:free',
         'openrouter/poolside/laguna-s-2.1:free'
       ],
       'openrouter/cohere/north-mini-code:free': [
         'openrouter/google/gemma-4-26b-a4b-it:free',
-        'openrouter/openai/gpt-oss-20b:free',
         'openrouter/poolside/laguna-s-2.1:free'
       ],
       'openrouter/poolside/laguna-s-2.1:free': [
         'openrouter/google/gemma-4-26b-a4b-it:free',
-        'openrouter/openai/gpt-oss-20b:free',
         'openrouter/cohere/north-mini-code:free'
       ],
       'openrouter/google/gemma-4-26b-a4b-it:free': [
-        'openrouter/openai/gpt-oss-20b:free',
         'openrouter/cohere/north-mini-code:free',
         'openrouter/poolside/laguna-s-2.1:free'
       ]
     };
-    
+
     // Return the fallback chain for the given model, or a general fallback list
     return fallbackChains[primaryModelId] || [
       'google/gemini-2.0-flash',
       'openrouter/google/gemma-4-26b-a4b-it:free',
-      'openrouter/openai/gpt-oss-20b:free'
+      'openrouter/cohere/north-mini-code:free',
+      'openrouter/poolside/laguna-s-2.1:free'
     ];
   }
 }

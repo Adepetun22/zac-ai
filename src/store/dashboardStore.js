@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import supabaseService from '../services/supabaseService';
 import AIService from '../services/aiService';
+import { useAIStore } from './aiStore';
 
 const useDashboardStore = create((set, get) => ({
   widgets: [],
@@ -24,12 +25,11 @@ const useDashboardStore = create((set, get) => ({
   },
 
   computeMetrics: () => {
-    const { aiModels } = get()
-    const totalApiRequests = aiModels.reduce((sum, model) => sum + (model.api_requests || 0), 0)
-    const totalTokensProcessed = aiModels.reduce((sum, model) => sum + (model.tokens_processed || 0), 0)
-    const totalCost = aiModels.reduce((sum, model) => sum + (model.cost || 0), 0)
+    const { aiModels } = useAIStore.getState()
+    const totalApiRequests = aiModels.reduce((sum, m) => sum + (m.api_requests || 0), 0)
+    const totalTokensProcessed = aiModels.reduce((sum, m) => sum + (m.tokens_processed || 0), 0)
+    const totalCost = aiModels.reduce((sum, m) => sum + (m.cost || 0), 0)
     const activeModels = aiModels.filter(m => m.status === 'active').length
-
     set({
       metrics: {
         totalApiRequests,
@@ -151,7 +151,6 @@ const useDashboardStore = create((set, get) => ({
   // Fetch AI models - Updated to use AI service
   fetchAiModels: async (userId) => {
     if (!userId) return;
-    
     try {
       let aiModels = [];
       try {
@@ -159,21 +158,13 @@ const useDashboardStore = create((set, get) => ({
       } catch (supabaseError) {
         console.warn('Error fetching AI models from Supabase:', supabaseError);
       }
-      
-      if (!aiModels || aiModels.length === 0) {
-        aiModels = AIService.getAvailableModels();
-      }
-      
-      set({ aiModels });
-      get().computeMetrics()
+      set({ aiModels: aiModels || [] });
+      useAIStore.getState().syncUserModels(aiModels || []);
+      get().computeMetrics();
     } catch (error) {
       console.error('Error in fetchAiModels:', error);
-      const fallbackModels = AIService.getAvailableModels();
-      set({ 
-        aiModels: fallbackModels,
-        aiModelsError: error.message 
-      });
-      get().computeMetrics()
+      set({ aiModels: [], aiModelsError: error.message });
+      get().computeMetrics();
     }
   },
 
@@ -186,6 +177,7 @@ const useDashboardStore = create((set, get) => ({
         aiModels: [...state.aiModels, model],
         isLoading: false 
       }));
+      useAIStore.getState().syncUserModels([...get().aiModels]);
       get().computeMetrics()
     } catch (error) {
       console.error('Error adding AI model:', error);
@@ -204,6 +196,7 @@ const useDashboardStore = create((set, get) => ({
         ),
         isLoading: false
       }));
+      useAIStore.getState().syncUserModels([...get().aiModels]);
       get().computeMetrics()
     } catch (error) {
       console.error('Error updating AI model:', error);
@@ -215,11 +208,14 @@ const useDashboardStore = create((set, get) => ({
   deleteAiModel: async (id) => {
     set({ isLoading: true, error: null });
     try {
+      // Find model_id before removing
+      const model = get().aiModels.find(m => m.id === id);
       await supabaseService.deleteAiModel(id);
       set((state) => ({
         aiModels: state.aiModels.filter(model => model.id !== id),
         isLoading: false
       }));
+      if (model?.model_id) useAIStore.getState().removeUserModel(model.model_id);
       get().computeMetrics()
     } catch (error) {
       console.error('Error deleting AI model:', error);
@@ -232,6 +228,10 @@ const useDashboardStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await AIService.generateResponse(prompt, modelId);
+      const responseText = typeof response === 'string' ? response : JSON.stringify(response);
+      useAIStore.getState().recordRequest(modelId, responseText);
+      useAIStore.getState().recordConversation(modelId, prompt, responseText);
+      get().computeMetrics();
       set({ isLoading: false });
       return response;
     } catch (error) {

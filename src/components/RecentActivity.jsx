@@ -1,49 +1,52 @@
-import { MoreHorizontal, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
+import { MessageSquare, Bot } from 'lucide-react'
+import { useAIStore } from '../store/aiStore'
 
-const statusConfig = {
-  completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'Completed' },
-  processing: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', label: 'Processing' },
-  failed: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', label: 'Failed' },
-}
+export default function RecentActivity() {
+  const { conversations, aiModels } = useAIStore()
 
-export default function RecentActivity({ activities = [] }) {
+  // Flatten all conversations into a list of {modelId, modelName, question, answer, index}
+  const items = []
+  Object.entries(conversations).forEach(([modelId, messages]) => {
+    const model = aiModels.find(m => m.id === modelId)
+    const modelName = model?.name || modelId
+    for (let i = 0; i < messages.length - 1; i += 2) {
+      const user = messages[i]
+      const assistant = messages[i + 1]
+      if (user?.role === 'user') {
+        items.push({ key: `${modelId}-${i}`, modelName, question: user.content, answer: assistant?.content || '' })
+      }
+    }
+  })
+  // Most recent first (last pushed = most recent)
+  items.reverse()
+  const recent = items.slice(0, 8)
+
   return (
     <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Recent Activity</h3>
-          <p className="text-sm text-slate-500">Latest AI model interactions</p>
-        </div>
-        <button className="text-sm text-indigo-600 hover:text-indigo-700 dark:text-[var(--color-brand-500)] dark:hover:text-[var(--color-brand-700)] font-medium">View all</button>
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Recent Activity</h3>
+        <p className="text-sm text-slate-500">Latest AI model interactions</p>
       </div>
 
-      {activities.length === 0 ? (
-        <div className="text-center py-8 text-slate-500 text-sm">No recent activity</div>
+      {recent.length === 0 ? (
+        <div className="text-center py-8 text-slate-500 text-sm">No recent activity — start a conversation in AI Models</div>
       ) : (
-        <div className="space-y-4">
-          {activities.map((activity) => {
-            const status = statusConfig[activity.status] || statusConfig.completed
-            const StatusIcon = status.icon
-            return (
-              <div key={activity.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg hover:bg-slate-100 dark:hover:bg-[var(--color-border-subtle)] transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className={`p-2 rounded-lg ${status.bg}`}>
-                    <StatusIcon className={`w-4 h-4 ${status.color}`} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)]">{activity.prompt || activity.model || 'AI Request'}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{activity.model || ''} {activity.tokens ? `• ${activity.tokens.toLocaleString()} tokens` : ''}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-400">{activity.time || 'recently'}</span>
-                  <button className="p-1 hover:bg-slate-200 dark:hover:bg-[var(--color-border-strong)] rounded transition-colors">
-                    <MoreHorizontal className="w-4 h-4 text-slate-400" />
-                  </button>
-                </div>
+        <div className="space-y-3">
+          {recent.map((item) => (
+            <div key={item.key} className="p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Bot className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span className="text-xs font-medium text-indigo-600 dark:text-[var(--color-brand-500)] truncate">{item.modelName}</span>
               </div>
-            )
-          })}
+              <div className="flex items-start gap-2 mb-1">
+                <MessageSquare className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] line-clamp-1">{item.question}</p>
+              </div>
+              {item.answer && (
+                <p className="text-xs text-slate-500 line-clamp-2 ml-5">{item.answer}</p>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

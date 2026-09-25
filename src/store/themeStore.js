@@ -24,7 +24,7 @@ const STORAGE_KEYS = { theme: 'theme', accent: 'accentColor' };
 
 const useThemeStore = create((set, get) => ({
     // Theme state ('light', 'dark', or 'system')
-    theme: 'system',
+    theme: 'dark',
 
     // Accent color state
     accentColor: '#6366f1',
@@ -73,7 +73,7 @@ const useThemeStore = create((set, get) => ({
       const storedAccent = localStorage.getItem(STORAGE_KEYS.accent);
 
       if (storedAccent) set({ accentColor: storedAccent });
-      get().setTheme(storedTheme || 'system');
+      get().setTheme(storedTheme || 'dark');
     },
 
     // Update theme when the OS preference changes (only in 'system' mode)

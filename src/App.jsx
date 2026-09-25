@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LiveblocksProvider } from '@liveblocks/react';
 
 import Header from './components/Header';
@@ -11,6 +11,10 @@ import CollaborationPage from './features/collaboration/CollaborationPage';
 import SettingsPage from './features/settings/SettingsPage';
 import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
+import LandingPage from './features/landing/LandingPage';
+import FeaturesPage from './features/pages/FeaturesPage';
+import HowItWorksPage from './features/pages/HowItWorksPage';
+import AdvantagesPage from './features/pages/AdvantagesPage';
 import useAuthStore from './store/authStore';
 import useThemeStore from './store/themeStore';
 import { liveblocksClient, liveblocksAuthEndpoint } from './config/liveblocks';
@@ -18,6 +22,13 @@ import { resolveUsers, resolveRooms } from './liveblocks.config';
 import { useLiveblocks } from './hooks/useLiveblocks';
 import NotificationProvider from './components/Notification';
 import useNotificationStore from './store/notificationStore';
+
+// Scroll to top on route change
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+};
 
 // ProtectedRoute component
 const ProtectedRoute = ({ children, isLoading, isAuthenticated }) => {
@@ -201,6 +212,7 @@ function App() {
   // Conditionally render LiveblocksProvider based on whether client is available
   const innerContent = (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <ScrollToTop />
       <Routes>
         <Route
           path="/login"
@@ -221,6 +233,50 @@ function App() {
               isAuthenticated={isAuthenticated}
             >
               <SignupPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/"
+          element={
+            <PublicRoute
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+            >
+              <LandingPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/features"
+          element={
+            <PublicRoute
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+            >
+              <FeaturesPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/how-it-works"
+          element={
+            <PublicRoute
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+            >
+              <HowItWorksPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/advantages"
+          element={
+            <PublicRoute
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+            >
+              <AdvantagesPage />
             </PublicRoute>
           }
         />

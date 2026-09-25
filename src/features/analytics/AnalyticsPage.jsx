@@ -1,133 +1,68 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import useDashboardStore from '../../store/dashboardStore';
-import useAuthStore from '../../store/authStore';
+import { useAIStore } from '../../store/aiStore';
 
 export default function AnalyticsPage() {
-  const [dateRange, setDateRange] = useState('week'); // week, month, year
-  const { 
-    analytics, 
-    aiModels,
-    isLoading, 
-    error, 
-    fetchAnalytics,
-    clearError
-  } = useDashboardStore();
-  const { user } = useAuthStore();
+  const [dateRange, setDateRange] = useState('week');
+  const { aiModels, conversations } = useAIStore();
 
-  // Calculate date range for fetching analytics
-  const calculateDateRange = useMemo(() => {
-    return () => {
-      const today = new Date();
-      let startDate = new Date();
-      
-      switch(dateRange) {
-        case 'week':
-          startDate.setDate(today.getDate() - 7);
-          break;
-        case 'month':
-          startDate.setMonth(today.getMonth() - 1);
-          break;
-        case 'year':
-          startDate.setFullYear(today.getFullYear() - 1);
-          break;
-        default:
-          startDate.setDate(today.getDate() - 7);
-      }
-      
-      return { startDate, endDate: today };
-    };
-  }, [dateRange]);
+  // Build per-day request + token data from conversations
+  const chartData = useMemo(() => {
+    const days = dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 365;
+    const buckets = {};
 
-  // Fetch analytics data when user is authenticated and date range changes
-  useEffect(() => {
-    if (user?.id) {
-      const { startDate, endDate } = calculateDateRange();
-      fetchAnalytics(user.id, startDate, endDate);
-    }
-  }, [user?.id, dateRange, fetchAnalytics, calculateDateRange]);
-
-  // Prepare data for charts based on fetched analytics
-  const prepareWeeklyData = useMemo(() => {
-    if (!analytics || analytics.length === 0) {
-      // Return mock data if no analytics available
-      return [
-        { day: 'Mon', requests: 4200, tokens: 28000 },
-        { day: 'Tue', requests: 3800, tokens: 24000 },
-        { day: 'Wed', requests: 5100, tokens: 34000 },
-        { day: 'Thu', requests: 4600, tokens: 31000 },
-        { day: 'Fri', requests: 5800, tokens: 39000 },
-        { day: 'Sat', requests: 3200, tokens: 21000 },
-        { day: 'Sun', requests: 2800, tokens: 18000 },
-      ];
+    // Initialise empty buckets for the range
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      buckets[key] = { day: key, requests: 0, tokens: 0 };
     }
 
-    // Group analytics by day and aggregate data
-    const groupedData = analytics.reduce((acc, record) => {
-      const date = new Date(record.created_at).toLocaleDateString();
-      if (!acc[date]) {
-        acc[date] = { day: date, requests: 0, tokens: 0 };
-      }
-      acc[date].requests += record.api_requests || 0;
-      acc[date].tokens += record.tokens_processed || 0;
-      return acc;
-    }, {});
+    // Each conversation pair (user+assistant) = 1 request
+    // We don't store timestamps per message, so distribute evenly across today
+    // and accumulate totals from aiModels for the chart
+    const totalRequests = aiModels.reduce((s, m) => s + (m.api_requests || 0), 0);
+    const totalTokens = aiModels.reduce((s, m) => s + (m.tokens_processed || 0), 0);
 
-    return Object.values(groupedData).slice(0, 7);
-  }, [analytics]);
-
-  const prepareModelPerformance = useMemo(() => {
-    if (aiModels && aiModels.length > 0) {
-      return aiModels.slice(0, 4).map(m => ({
-        model: m.name,
-        accuracy: m.accuracy ?? Math.min(99, 80 + Math.round((m.api_requests || 0) % 20)),
-        speed: m.latency ? Math.max(10, Math.round(100 - (m.latency / 50))) : 75,
-      }));
+    // Put all accumulated data on today's bucket
+    const todayKey = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (buckets[todayKey]) {
+      buckets[todayKey].requests = totalRequests;
+      buckets[todayKey].tokens = totalTokens;
     }
-    return [
-      { model: 'Gemini 2.0 Flash', accuracy: 94, speed: 92 },
-      { model: 'Gemma 4 26B', accuracy: 88, speed: 80 },
-      { model: 'GPT-OSS 20B', accuracy: 85, speed: 78 },
-      { model: 'North Mini Code', accuracy: 82, speed: 85 },
-    ];
+
+    return Object.values(buckets);
+  }, [aiModels, conversations, dateRange]);
+
+  // Model performance: use real api_requests as usage score, latency for speed
+  const modelPerformance = useMemo(() => {
+    const userModels = aiModels.filter(m => !m.isBuiltIn && m.api_requests > 0);
+    const builtInUsed = aiModels.filter(m => m.isBuiltIn && m.api_requests > 0);
+    const display = [...userModels, ...builtInUsed].slice(0, 8);
+
+    if (display.length === 0) return [];
+
+    const maxReqs = Math.max(...display.map(m => m.api_requests || 1));
+    return display.map(m => ({
+      model: m.name,
+      requests: m.api_requests || 0,
+      usage: Math.round(((m.api_requests || 0) / maxReqs) * 100),
+      speed: m.latency ? Math.max(5, Math.round(100 - (m.latency / 50))) : 80,
+      tokens: m.tokens_processed || 0,
+    }));
   }, [aiModels]);
 
-  const weeklyData = prepareWeeklyData;
-  const modelPerformance = prepareModelPerformance;
+  // Summary stats
+  const totalRequests = aiModels.reduce((s, m) => s + (m.api_requests || 0), 0);
+  const totalTokens = aiModels.reduce((s, m) => s + (m.tokens_processed || 0), 0);
+  const totalConversations = Object.values(conversations).reduce((s, msgs) => s + Math.floor(msgs.length / 2), 0);
+  const activeModels = aiModels.filter(m => m.api_requests > 0).length;
 
-  // Handle loading and error states
-  if (isLoading && analytics.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <p className="text-sm text-red-700">
-              <strong>Error:</strong> {error}
-              <button 
-                onClick={clearError}
-                className="ml-4 text-sm font-medium text-red-700 underline"
-              >
-                Dismiss
-              </button>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const btnCls = (range) =>
+    `px-3 py-1.5 text-sm rounded-md ${dateRange === range
+      ? 'bg-indigo-100 dark:bg-[var(--color-brand-50)] text-indigo-700 dark:text-[var(--color-brand-500)]'
+      : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-700 dark:text-[var(--color-text-secondary)] hover:bg-slate-200 dark:hover:bg-[var(--color-border-subtle)]'}`;
 
   return (
     <div>
@@ -135,110 +70,101 @@ export default function AnalyticsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)]">Analytics</h2>
-            <p className="text-slate-500 mt-1">Deep dive into your AI platform performance metrics.</p>
+            <p className="text-slate-500 mt-1">AI usage data from your Collaboration sessions.</p>
           </div>
           <div className="flex space-x-2">
-            <button
-              onClick={() => setDateRange('week')}
-              className={`px-3 py-1.5 text-sm rounded-md ${
-                dateRange === 'week'
-                  ? 'bg-indigo-100 dark:bg-[var(--color-brand-50)] text-indigo-700 dark:text-[var(--color-brand-500)]'
-                  : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-700 dark:text-[var(--color-text-secondary)] hover:bg-slate-200 dark:hover:bg-[var(--color-border-subtle)]'
-              }`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setDateRange('month')}
-              className={`px-3 py-1.5 text-sm rounded-md ${
-                dateRange === 'month'
-                  ? 'bg-indigo-100 dark:bg-[var(--color-brand-50)] text-indigo-700 dark:text-[var(--color-brand-500)]'
-                  : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-700 dark:text-[var(--color-text-secondary)] hover:bg-slate-200 dark:hover:bg-[var(--color-border-subtle)]'
-              }`}
-            >
-              Month
-            </button>
-            <button
-              onClick={() => setDateRange('year')}
-              className={`px-3 py-1.5 text-sm rounded-md ${
-                dateRange === 'year'
-                  ? 'bg-indigo-100 dark:bg-[var(--color-brand-50)] text-indigo-700 dark:text-[var(--color-brand-500)]'
-                  : 'bg-slate-100 dark:bg-[var(--color-bg-canvas)] text-slate-700 dark:text-[var(--color-text-secondary)] hover:bg-slate-200 dark:hover:bg-[var(--color-border-subtle)]'
-              }`}
-            >
-              Year
-            </button>
+            <button onClick={() => setDateRange('week')} className={btnCls('week')}>Week</button>
+            <button onClick={() => setDateRange('month')} className={btnCls('month')}>Month</button>
+            <button onClick={() => setDateRange('year')} className={btnCls('year')}>Year</button>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">Weekly Requests</h3>
-          <p className="text-sm text-slate-500 mb-6">API calls over the selected period</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={weeklyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
-              <XAxis dataKey="day" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                labelStyle={{ color: 'var(--color-text-primary)', fontWeight: '600' }}
-              />
-              <Bar dataKey="requests" fill="var(--color-brand-500)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">Token Usage Trend</h3>
-          <p className="text-sm text-slate-500 mb-6">Token consumption over the selected period</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={weeklyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
-              <XAxis dataKey="day" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                labelStyle={{ color: 'var(--color-text-primary)', fontWeight: '600' }}
-              />
-              <Line type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: '#10b981' }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+      {/* Summary stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: 'Total Requests', value: totalRequests.toLocaleString() },
+          { label: 'Tokens Processed', value: totalTokens.toLocaleString() },
+          { label: 'Conversations', value: totalConversations.toLocaleString() },
+          { label: 'Models Used', value: activeModels.toString() },
+        ].map(({ label, value }) => (
+          <div key={label} className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-4">
+            <p className="text-sm text-slate-500">{label}</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-[var(--color-text-primary)] mt-1">{value}</p>
+          </div>
+        ))}
       </div>
 
-      <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">Model Performance</h3>
-        <p className="text-sm text-slate-500 mb-6">Accuracy and speed comparison</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {modelPerformance.map((item) => (
-            <div key={item.model} className="p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
-              <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] mb-3">{item.model}</p>
-              <div className="space-y-2">
-                <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-500">Accuracy</span>
-                    <span className="font-medium text-slate-700 dark:text-[var(--color-text-primary)]">{item.accuracy}%</span>
-                  </div>
-                  <div className="w-full bg-slate-200 dark:bg-[var(--color-border-subtle)] rounded-full h-1.5">
-                    <div className="bg-indigo-500 dark:bg-[var(--color-brand-500)] h-1.5 rounded-full" style={{ width: `${item.accuracy}%` }}></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-500">Speed</span>
-                    <span className="font-medium text-slate-700 dark:text-[var(--color-text-primary)]">{item.speed}%</span>
-                  </div>
-                  <div className="w-full bg-slate-200 dark:bg-[var(--color-border-subtle)] rounded-full h-1.5">
-                    <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${item.speed}%` }}></div>
-                  </div>
-                </div>
-              </div>
+      {totalRequests === 0 ? (
+        <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-12 text-center">
+          <p className="text-slate-500 text-sm">No data yet — start chatting in the Collaboration page to see analytics here.</p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">API Requests</h3>
+              <p className="text-sm text-slate-500 mb-6">Requests over the selected period</p>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+                  <XAxis dataKey="day" stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)' }} />
+                  <Bar dataKey="requests" fill="var(--color-brand-500)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">Token Usage</h3>
+              <p className="text-sm text-slate-500 mb-6">Token consumption over the selected period</p>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
+                  <XAxis dataKey="day" stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)' }} />
+                  <Line type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 3 }} activeDot={{ r: 5 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-[var(--color-bg-surface)] rounded-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-6">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-1">Model Usage</h3>
+            <p className="text-sm text-slate-500 mb-6">Requests and speed per model</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {modelPerformance.map((item) => (
+                <div key={item.model} className="p-4 bg-slate-50 dark:bg-[var(--color-bg-canvas)] rounded-lg">
+                  <p className="text-sm font-medium text-slate-900 dark:text-[var(--color-text-primary)] mb-1 truncate">{item.model}</p>
+                  <p className="text-xs text-slate-400 mb-3">{item.requests} requests · {item.tokens.toLocaleString()} tokens</p>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-500">Usage</span>
+                        <span className="font-medium text-slate-700 dark:text-[var(--color-text-primary)]">{item.usage}%</span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-[var(--color-border-subtle)] rounded-full h-1.5">
+                        <div className="bg-indigo-500 dark:bg-[var(--color-brand-500)] h-1.5 rounded-full" style={{ width: `${item.usage}%` }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-500">Speed</span>
+                        <span className="font-medium text-slate-700 dark:text-[var(--color-text-primary)]">{item.speed}%</span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-[var(--color-border-subtle)] rounded-full h-1.5">
+                        <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${item.speed}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
