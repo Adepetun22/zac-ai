@@ -6,7 +6,7 @@ import { useNotification } from '../../components/useNotification';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('profile');
-  const { user, updateUser } = useAuthStore();
+  const { user, updateUser, updatePassword: updateUserPassword } = useAuthStore();
   const { addNotification } = useNotification();
   
   // Profile state - initialize with default values based on user
@@ -17,11 +17,27 @@ export default function SettingsPage() {
   }));
   
   // Notification settings state
-  const [notifications, setNotifications] = useState({
-    email: true,
-    push: true,
-    weeklyDigest: true,
-    modelAlerts: false
+  const [notifications, setNotifications] = useState(() => {
+    const saved = user?.user_metadata?.notification_settings;
+    if (saved) {
+      try {
+        const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
+        return {
+          email: parsed.email ?? true,
+          push: parsed.push ?? true,
+          weeklyDigest: parsed.weeklyDigest ?? true,
+          modelAlerts: parsed.modelAlerts ?? false
+        };
+      } catch {
+        // fall through to defaults
+      }
+    }
+    return {
+      email: true,
+      push: true,
+      weeklyDigest: true,
+      modelAlerts: false
+    };
   });
   
   // Security state
@@ -78,6 +94,18 @@ export default function SettingsPage() {
     }));
   };
 
+  // Handle notification settings submission
+  const handleNotificationsSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await updateUser({ data: { notification_settings: notifications } });
+      addNotification('Notification settings saved!', 'success');
+    } catch (error) {
+      console.error('Error saving notification settings:', error);
+      addNotification('Error saving notification settings: ' + error.message, 'error');
+    }
+  };
+
   // Handle security form submission
   const handleSecuritySubmit = async (e) => {
     e.preventDefault();
@@ -99,8 +127,14 @@ export default function SettingsPage() {
     }
     
     try {
-      addNotification('Password update functionality would be handled by Supabase in a real application. For security reasons, password changes require specific authentication flows.', 'info');
+      const { error } = await updateUserPassword(security.newPassword);
       
+      if (error) {
+        addNotification('Error updating password: ' + error.message, 'error');
+        return;
+      }
+      
+      addNotification('Password updated successfully!', 'success');
       setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (error) {
       console.error('Error updating password:', error);
@@ -234,7 +268,7 @@ export default function SettingsPage() {
           )}
 
           {activeTab === 'notifications' && (
-            <div className="max-w-2xl space-y-4">
+            <form onSubmit={handleNotificationsSubmit} className="max-w-2xl space-y-4">
               {[
                 { id: 'email', label: 'Email notifications', desc: 'Receive updates about email notifications.' },
                 { id: 'push', label: 'Push notifications', desc: 'Receive updates about push notifications.' },
@@ -257,7 +291,16 @@ export default function SettingsPage() {
                   </label>
                 </div>
               ))}
-            </div>
+              <div className="flex justify-end pt-2">
+                <button 
+                  type="submit"
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 dark:bg-[var(--color-brand-500)] text-white rounded-lg text-sm font-medium hover:bg-indigo-700 dark:hover:opacity-90 transition-colors cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  Save Changes
+                </button>
+              </div>
+            </form>
           )}
 
           {activeTab === 'security' && (
@@ -265,8 +308,7 @@ export default function SettingsPage() {
               <div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-[var(--color-text-primary)] mb-2">Change Password</h3>
                 <p className="text-xs text-slate-500 mb-4">
-                  Password updates are handled securely through Supabase authentication system.
-                  In a production environment, this would initiate a secure password change flow.
+                  Update your password. You will remain logged in on this device after the change.
                 </p>
                 <div className="space-y-3">
                   <input 

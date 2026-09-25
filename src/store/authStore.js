@@ -241,6 +241,14 @@ const useAuthStore = create((set, get) => ({
     }
     
     return { error };
+  },
+
+  updatePassword: async (newPassword) => {
+    if (!supabase) {
+      console.warn('Supabase not configured, mock password update');
+      return { error: null };
+    }
+    return await supabaseService.updatePassword(newPassword);
   }
 }));
 

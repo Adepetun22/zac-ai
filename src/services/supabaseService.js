@@ -48,6 +48,15 @@ class SupabaseService {
     return this.client.auth.getUser();
   }
 
+  // Update the current user's password (requires an active session)
+  async updatePassword(newPassword) {
+    const { error } = await this.client.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+    return { error: null };
+  }
+
   // Get a user's profile from the profiles table
   async getProfile(userId) {
     const { data, error } = await this.client
