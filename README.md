@@ -180,4 +180,4 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 
 ## Support
 
-If you encounter any issues or have questions about the project, please open an issue in the repository.
+If you encounter any issues or have questions about the project, please open an issue in the repository
