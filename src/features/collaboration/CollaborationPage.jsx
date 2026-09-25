@@ -525,7 +525,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--color-bg-surface)' }}>
       <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
-        <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
+        <img src="/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
         <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Prompt</span>
         <div className="ml-auto relative">
           <select
@@ -640,7 +640,7 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
       >
         <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <div className="flex items-center gap-2">
-            <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
+            <img src="/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Invite Collaborators</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">
@@ -715,7 +715,7 @@ function ModelExplainerModal({ onClose }) {
       >
         <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: 'var(--color-border-subtle)' }}>
           <div className="flex items-center gap-2">
-            <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
+            <img src="/zac-thumbnail.png.png" alt="Zac AI" className="w-7 h-7 rounded-lg object-cover" />
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>AI Models Overview</h3>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer">

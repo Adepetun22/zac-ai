@@ -59,7 +59,7 @@ function OnboardingModal({ onClose }) {
         {/* Header */}
         <div className="px-6 pt-6 pb-4 flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <img src="/src/assets/zac-thumbnail.png.png" alt="Zac AI" className="w-9 h-9 rounded-lg object-cover" />
+            <img src="/zac-thumbnail.png.png" alt="Zac AI" className="w-9 h-9 rounded-lg object-cover" />
             <span className="text-sm font-semibold text-slate-900 dark:text-[var(--color-text-primary)]">Welcome to Zac-AI</span>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-[var(--color-bg-canvas)] transition-colors cursor-pointer">
