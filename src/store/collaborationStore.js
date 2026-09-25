@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const useCollaborationStore = create((set, get) => ({
+const useCollaborationStore = create((set, _get) => ({
   sessionId: null,
   isHost: false,
   disconnectUser: null,

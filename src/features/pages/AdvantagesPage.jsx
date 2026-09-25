@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Zap, Shield, Globe, ArrowRight, Menu, X, Sparkles,
-  TrendingUp, Clock, DollarSign, Users, CheckCircle2,
-  XCircle, Cpu, Lock, BarChart3, Layers,
+  TrendingUp, Clock, DollarSign, CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import AnimatedBackground from '../../components/landing/ConstellationGrid';
 import ThemeToggle from '../../components/landing/ThemeToggle';

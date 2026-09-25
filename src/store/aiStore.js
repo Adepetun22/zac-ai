@@ -12,7 +12,7 @@ export const FREE_MODELS = [
 
 export const useAIStore = create(
   persist(
-    (set, get) => ({
+    (set, _get) => ({
   // All models: built-in free + user-registered. Single source of truth for Collaboration.
   aiModels: [...FREE_MODELS],
 

@@ -113,7 +113,7 @@ export function useWebSocket({
           }
         });
       })
-      .on('presence', { event: 'leave' }, ({ key }) => {
+      .on('presence', { event: 'leave' }, () => {
         // We can't reliably map connectionId -> userId here without extra state,
         // so we defer leave handling to the next 'sync' event which has the full picture.
       })

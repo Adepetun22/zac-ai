@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Bot, Users, LineChart, Image as ImageIcon, Shield, Globe,
+  Bot, Users, LineChart, Image as ICON, Shield, Globe,
   ArrowRight, Menu, X, Sparkles, Zap, Code2, BarChart3,
-  RefreshCw, Lock, Smartphone, Cpu, Database, Layers,
+  RefreshCw, Cpu, Database, Layers,
   CheckCircle2,
 } from 'lucide-react';
 import AnimatedBackground from '../../components/landing/ConstellationGrid';
@@ -32,7 +32,7 @@ const FEATURES = [
     bullets: ['10+ providers in one UI', 'Per-model cost tracking', 'Smart routing by query type'],
   },
   {
-    icon: ImageIcon,
+    icon: ICON,
     title: 'AI Image Generation',
     description: 'Generate visuals directly inside your workflow with Hugging Face and image-capable models.',
     color: 'from-pink-500 to-rose-600',

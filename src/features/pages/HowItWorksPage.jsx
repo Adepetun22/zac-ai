@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Menu, X, Sparkles, Plug, MessageSquare,
+  ArrowRight, Menu, X, Plug, MessageSquare,
   Share2, ChevronDown, ChevronUp, CheckCircle2, Zap,
   Users, BarChart3, Key, Bell, Play,
 } from 'lucide-react';

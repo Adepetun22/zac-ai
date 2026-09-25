@@ -799,9 +799,14 @@ export default function CollaborationPage() {
     color: getPeerColor(user?.id || 'anonymous'),
   }
   const currentUserRef = useRef(currentUser)
-  currentUserRef.current = currentUser
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
+
+  // Sync the ref outside of render (mutating refs during render is an
+  // anti-pattern that React 19 flags and can break concurrent mode).
+  useEffect(() => {
+    currentUserRef.current = currentUser
+  }, [currentUser.id, currentUser.name, currentUser.color])
 
   // Load widgets from localStorage as fallback
   const loadLocalWidgets = useCallback(() => {
@@ -848,7 +853,10 @@ export default function CollaborationPage() {
   useEffect(() => {
     const seen = localStorage.getItem('zac-collab-explainer-seen')
     if (!seen) {
-      setShowExplainer(true)
+      // Defer setState out of the synchronous effect body to avoid a
+      // cascading-render warning in React 19.
+      const id = requestAnimationFrame(() => setShowExplainer(true))
+      return () => cancelAnimationFrame(id)
     }
   }, []);
 

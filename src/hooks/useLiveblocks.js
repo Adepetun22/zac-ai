@@ -58,7 +58,7 @@ export const useLiveblocks = (roomId, currentUser = null) => {
           lastOthersUpdateRef.current = now;
 
           if (mountedRef.current) {
-            const othersArray = toothersArrayInner(others);
+            const othersArray = othersArrayInner(others);
             setRoomData(prev => ({
               ...prev,
               others: othersArray,
@@ -162,7 +162,7 @@ export const useLiveblocks = (roomId, currentUser = null) => {
 };
 
 // Internal helper, defined outside the component so it can be hoisted.
-function toothersArrayInner(others) {
+function othersArrayInner(others) {
   if (!others) return [];
   if (typeof others.toArray === 'function') return others.toArray();
   if (Array.isArray(others)) return others;
