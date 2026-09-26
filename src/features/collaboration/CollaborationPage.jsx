@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useCallback } from 'react'
+﻿import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
@@ -9,6 +9,14 @@ import {
 } from 'recharts'
 import { supabase } from '../../config/supabase'
 import supabaseService from '../../services/supabaseService'
+import WidgetCommentsPopover from './WidgetCommentsPopover'
+import {
+  fetchWidgetComments,
+  createComment,
+  updateComment as updateCommentRow,
+  deleteComment as deleteCommentRow,
+  subscribeToWidgetComments,
+} from './widgetComments'
 import useAuthStore from '../../store/authStore'
 import useCollaborationStore from '../../store/collaborationStore'
 import useDashboardStore from '../../store/dashboardStore'
@@ -324,7 +332,7 @@ const WIDGET_WIDTH = {
 }
 
 // ─── Draggable Widget ─────────────────────────────────────────────────────────
-function Widget({ widget, onMove, onRemove }) {
+function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOpen, onToggleComments, onDragStart }) {
   const dragOffset = useRef(null)
   const isDragging = useRef(false)
 
@@ -338,6 +346,8 @@ function Widget({ widget, onMove, onRemove }) {
   const onPointerDown = (e) => {
     if (e.target.closest('button')) return
     isDragging.current = false
+    // Starting a drag dismisses any comment popover anchored to this widget.
+    onDragStart?.(widget.id)
     const { clientX, clientY } = getClientCoords(e)
     dragOffset.current = { x: clientX - widget.x, y: clientY - widget.y }
 
@@ -402,6 +412,25 @@ function Widget({ widget, onMove, onRemove }) {
           {widget.schema.type === 'image' && (
             <button onClick={(e) => { e.stopPropagation(); handleDownload() }} className="p-1 rounded cursor-pointer transition-colors hover:opacity-70" style={{ color: 'var(--color-text-muted)' }} title="Download image">
               <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {canComment && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleComments(widget.id, e.currentTarget) }}
+              className="p-1 rounded cursor-pointer transition-colors hover:opacity-70 relative"
+              style={{ color: commentsOpen ? 'var(--color-brand-500)' : 'var(--color-text-muted)' }}
+              title="Comments"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              {commentCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full text-[9px] font-semibold flex items-center justify-center text-white"
+                  style={{ backgroundColor: 'var(--color-brand-500)' }}
+                >
+                  {commentCount > 99 ? '99+' : commentCount}
+                </span>
+              )}
             </button>
           )}
           <GripVertical className="w-4 h-4" style={{ color: 'var(--color-border-subtle)' }} />
@@ -790,6 +819,10 @@ export default function CollaborationPage() {
   const [sessionId, setSessionId] = useState(null)
   const [showExplainer, setShowExplainer] = useState(false)
   const [isHost, setIsHost] = useState(false)
+  // Comments are keyed by widget_id. One popover is open at a time.
+  const [comments, setComments] = useState({})
+  const [commentsOpenFor, setCommentsOpenFor] = useState(null)
+  const [commentAnchor, setCommentAnchor] = useState(null)
   const { user } = useAuthStore();
   const { addNotification } = useNotification();
   const { setSession, setDisconnectUser, clearSession } = useCollaborationStore();
@@ -983,6 +1016,88 @@ export default function CollaborationPage() {
     };
   }, [sessionId]);
 
+  // Subscribe to real-time widget comment changes. Own optimistic writes echo
+  // back here, so every handler dedupes on `id`.
+  useEffect(() => {
+    if (!supabase || !sessionId) return;
+
+    const channel = subscribeToWidgetComments(sessionId, (payload) => {
+      const row = payload.new || payload.old;
+      if (!row?.id) return;
+
+      if (payload.eventType === 'DELETE') {
+        setComments(prev => {
+          // With the default replica identity a DELETE payload carries only
+          // the primary key, so fall back to locating the owning widget.
+          const bucketId =
+            row.widget_id ||
+            Object.keys(prev).find(id => (prev[id] || []).some(c => c.id === row.id));
+          if (!bucketId) return prev;
+          return {
+            ...prev,
+            [bucketId]: (prev[bucketId] || []).filter(c => c.id !== row.id),
+          };
+        });
+        return;
+      }
+
+      if (!row.widget_id) return;
+      setComments(prev => {
+        const list = prev[row.widget_id] || [];
+        const exists = list.some(c => c.id === row.id);
+        return {
+          ...prev,
+          [row.widget_id]: exists
+            ? list.map(c => (c.id === row.id ? { ...c, ...row } : c))
+            : [...list, row],
+        };
+      });
+    });
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [sessionId]);
+
+  // Initial comment load — one batched query for every widget, mirroring the
+  // batching in supabaseService.getWidgets (Postgres IN limit).
+  useEffect(() => {
+    if (!supabase || !user?.id) return;
+
+    const widgetIds = uniqueWidgets(widgets)
+      .map(w => w.id)
+      .filter(id => isUUID(id));
+    if (widgetIds.length === 0) return;
+
+    const missing = widgetIds.filter(id => !comments[id]);
+    if (missing.length === 0) return;
+
+    let active = true;
+    (async () => {
+      try {
+        const rows = await fetchWidgetComments(missing);
+        if (!active) return;
+        setComments(prev => {
+          const next = { ...prev };
+          for (const id of missing) {
+            if (!next[id]) next[id] = [];
+          }
+          for (const row of rows) {
+            if (!next[row.widget_id]) next[row.widget_id] = [];
+            if (!next[row.widget_id].some(c => c.id === row.id)) {
+              next[row.widget_id].push(row);
+            }
+          }
+          return next;
+        });
+      } catch (error) {
+        console.warn('Could not load widget comments:', error.message);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [widgets, comments, user?.id]);
+
   const updateCursorDOM = useCallback(({ peerId, name, color, x, y }) => {
     // Get the canvas container bounds for relative positioning
     const canvasElement = canvasRef.current;
@@ -1134,6 +1249,16 @@ export default function CollaborationPage() {
   }, [send, saveLocalWidgets])
 
   const removeWidget = useCallback(async (id) => {
+    // Comments cascade at the database level; drop the local copy and close
+    // the popover if it was anchored to this widget.
+    setComments(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setCommentsOpenFor(prevOpen => (prevOpen === id ? null : prevOpen));
+    setCommentAnchor(null);
+
     setWidgets(prev => {
       const next = prev.filter(w => w.id !== id)
       saveLocalWidgets(next)
@@ -1152,6 +1277,140 @@ export default function CollaborationPage() {
       }
     }
   }, [saveLocalWidgets])
+
+  // ─── Widget comments ───────────────────────────────────────────────────────
+  const closeComments = useCallback(() => {
+    setCommentsOpenFor(null)
+    setCommentAnchor(null)
+  }, [])
+
+  const toggleComments = useCallback((widgetId, anchorEl) => {
+    setCommentsOpenFor(prev => {
+      if (prev === widgetId) {
+        setCommentAnchor(null)
+        return null
+      }
+      setCommentAnchor(anchorEl || null)
+      return widgetId
+    })
+  }, [])
+
+  const closeCommentsForDrag = useCallback((widgetId) => {
+    setCommentsOpenFor(prev => {
+      if (prev === widgetId) setCommentAnchor(null)
+      return prev === widgetId ? null : prev
+    })
+  }, [])
+
+  const addComment = useCallback(async (widgetId, { parentId, content }) => {
+    if (!supabase || !sessionId || !user) return
+
+    const tempId = `temp-${crypto.randomUUID()}`
+    const optimistic = {
+      id: tempId,
+      widget_id: widgetId,
+      session_id: sessionId,
+      parent_id: parentId || null,
+      user_id: user.id,
+      author_name: currentUser.name,
+      content,
+      created_at: new Date().toISOString(),
+      pending: true,
+    }
+    setComments(prev => ({
+      ...prev,
+      [widgetId]: [...(prev[widgetId] || []), optimistic],
+    }))
+
+    try {
+      const row = await createComment({
+        widgetId,
+        sessionId,
+        parentId,
+        userId: user.id,
+        authorName: currentUser.name,
+        content,
+      })
+      // Swap the placeholder for the real row; the realtime echo dedupes on id.
+      setComments(prev => ({
+        ...prev,
+        [widgetId]: (prev[widgetId] || []).map(c => (c.id === tempId ? row : c)),
+      }))
+    } catch (error) {
+      console.warn('Could not create comment:', error.message)
+      setComments(prev => ({
+        ...prev,
+        [widgetId]: (prev[widgetId] || []).filter(c => c.id !== tempId),
+      }))
+      addNotification('Could not post comment', 'error')
+    }
+  }, [sessionId, user, currentUser.name, addNotification])
+
+  const editComment = useCallback(async (widgetId, commentId, content) => {
+    if (!supabase) return
+    // Capture the previous body inside the updater so the callback does not
+    // have to depend on the whole comments map.
+    let previous
+    setComments(prev => ({
+      ...prev,
+      [widgetId]: (prev[widgetId] || []).map(c => {
+        if (c.id !== commentId) return c
+        previous = c.content
+        return { ...c, content }
+      }),
+    }))
+
+    try {
+      const row = await updateCommentRow(commentId, content)
+      setComments(prev => ({
+        ...prev,
+        [widgetId]: (prev[widgetId] || []).map(c => (c.id === commentId ? row : c)),
+      }))
+    } catch (error) {
+      console.warn('Could not update comment:', error.message)
+      setComments(prev => ({
+        ...prev,
+        [widgetId]: (prev[widgetId] || []).map(c =>
+          c.id === commentId ? { ...c, content: previous } : c
+        ),
+      }))
+      addNotification('Could not edit comment', 'error')
+    }
+  }, [addNotification])
+
+  const removeComment = useCallback(async (widgetId, comment) => {
+    if (!supabase) return
+
+    // Deleting a parent cascades to its replies (parent_id ON DELETE CASCADE),
+    // so drop the whole subtree locally to match what the database will do.
+    setComments(prev => {
+      const list = prev[widgetId] || []
+      const doomed = new Set()
+      const collect = (id) => {
+        doomed.add(id)
+        for (const c of list) if (c.parent_id === id) collect(c.id)
+      }
+      collect(comment.id)
+      return { ...prev, [widgetId]: list.filter(c => !doomed.has(c.id)) }
+    })
+
+    try {
+      await deleteCommentRow(comment.id)
+    } catch (error) {
+      console.warn('Could not delete comment:', error.message)
+      addNotification('Could not delete comment', 'error')
+      try {
+        const rows = await fetchWidgetComments([widgetId])
+        setComments(prev => ({ ...prev, [widgetId]: rows }))
+      } catch { /* leave the optimistic state in place */ }
+    }
+  }, [addNotification])
+
+  const canComment = Boolean(supabase) && Boolean(user?.id)
+
+  // Stable ref object for the popover anchor — a fresh literal each render
+  // would re-run the popover's positioning effect every render.
+  const commentAnchorRef = useMemo(() => ({ current: commentAnchor }), [commentAnchor])
 
   const handleCreateInvite = () => {
     // The session id is the real room key — sharing it lets another user join
@@ -1283,9 +1542,33 @@ export default function CollaborationPage() {
         )}
 
         {uniqueWidgets(widgets).filter(w => w.schema.type !== 'text').map(w => (
-          <Widget key={w.id} widget={w} onMove={moveWidget} onRemove={removeWidget} />
+          <Widget
+            key={w.id}
+            widget={w}
+            onMove={moveWidget}
+            onRemove={removeWidget}
+            canComment={canComment}
+            commentCount={(comments[w.id] || []).length}
+            commentsOpen={commentsOpenFor === w.id}
+            onToggleComments={toggleComments}
+            onDragStart={closeCommentsForDrag}
+          />
         ))}
       </div>
+
+      {/* Widget comment thread popover — portalled to body because the widget
+          root is overflow-hidden. */}
+      {canComment && commentsOpenFor && commentAnchor && (
+        <WidgetCommentsPopover
+          anchorRef={commentAnchorRef}
+          comments={comments[commentsOpenFor] || []}
+          currentUserId={user?.id}
+          onAdd={({ parentId, content }) => addComment(commentsOpenFor, { parentId, content })}
+          onUpdate={(commentId, content) => editComment(commentsOpenFor, commentId, content)}
+          onDelete={(comment) => removeComment(commentsOpenFor, comment)}
+          onClose={closeComments}
+        />
+      )}
 
       {/* Chat Panel - Desktop: side-by-side, Mobile: overlay */}
       <div className={`
