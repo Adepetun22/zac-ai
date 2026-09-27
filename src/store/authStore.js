@@ -187,8 +187,13 @@ const useAuthStore = create((set, get) => ({
     
     const { error, data } = await supabaseService.signUp(email, password, name);
     if (error) return { error };
-    
-    if (data?.user) {
+
+    // Only authenticate immediately when Supabase hands back an active
+    // session. When email confirmation is required, `signUp` returns a user
+    // row but no session — logging in there would let the user bypass the
+    // confirmation link entirely, so the store stays unauthenticated and the
+    // signup page's "check your email" message is the real gate.
+    if (data?.user && data?.session) {
       // Best-effort: load the profile the trigger just created
       let user = { ...data.user, name: data.user.user_metadata?.name || name };
       try {
@@ -201,7 +206,7 @@ const useAuthStore = create((set, get) => ({
       }
       set({ user, isAuthenticated: true });
     }
-    
+
     return { error: null };
   },
   
@@ -210,6 +215,42 @@ const useAuthStore = create((set, get) => ({
       await supabase.auth.signOut();
     }
     set({ user: null, isAuthenticated: false });
+  },
+  
+  // Send a password reset email. Always reports success to the caller so the
+  // UI can show a neutral confirmation — Supabase deliberately does not reveal
+  // whether an address is registered, and echoing that back would let anyone
+  // enumerate accounts.
+  requestPasswordReset: async (email) => {
+    if (!supabase) {
+      console.warn('Supabase not configured, password reset unavailable');
+      return { error: new Error('Password reset is not available right now') };
+    }
+    
+    try {
+      await supabaseService.requestPasswordReset(email);
+      return { error: null };
+    } catch (err) {
+      return { error: err };
+    }
+  },
+  
+  // Set a new password from the recovery flow. Distinct from updatePassword,
+  // which serves the authenticated Settings change and must not sign the user
+  // out — the recovery session is single-purpose and is dropped here once the
+  // new password is set.
+  resetPassword: async (newPassword) => {
+    if (!supabase) {
+      return { error: new Error('Password reset is not available right now') };
+    }
+    
+    const { error } = await supabaseService.updatePassword(newPassword);
+    if (error) return { error };
+    
+    await supabase.auth.signOut();
+    set({ user: null, isAuthenticated: false });
+    
+    return { error: null };
   },
   
   updateUser: async (updates) => {

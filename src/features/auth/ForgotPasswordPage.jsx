@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Eye, EyeOff, ArrowRight, Menu, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, ArrowLeft, Mail, Menu, X } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import AnimatedBackground from '../../components/landing/ConstellationGrid';
 import ThemeToggle from '../../components/landing/ThemeToggle';
@@ -11,17 +11,15 @@ const NAV_LINKS = [
   { label: 'Advantages', href: '/advantages' },
 ];
 
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
-  const navigate = useNavigate();
-  const { signIn } = useAuthStore();
+  const { requestPasswordReset } = useAuthStore();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -33,15 +31,17 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccess('');
     try {
-      const { error } = await signIn(email, password);
+      const { error } = await requestPasswordReset(email);
       if (error) {
-        setError(error.message || 'Failed to sign in');
+        setError(error.message || 'Failed to send reset link');
       } else {
-        navigate('/dashboard');
+        setSuccess('If an account exists for that email, a password reset link is on its way. Check your inbox and follow the link to choose a new password.');
+        setEmail('');
       }
     } catch (err) {
-      setError(err.message || 'An error occurred during sign in');
+      setError(err.message || 'An error occurred while sending the reset link');
     } finally {
       setLoading(false);
     }
@@ -72,7 +72,7 @@ export default function LoginPage() {
             </div>
 
             <div className="hidden md:flex items-center gap-3">
-              <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">Sign in</span>
+              <Link to="/login" className="text-sm font-medium text-slate-600 dark:text-[var(--color-text-primary)] hover:text-slate-900 transition-colors">Sign in</Link>
               <Link to="/signup" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-all">
                 Get Started <ArrowRight className="w-4 h-4" />
               </Link>
@@ -104,52 +104,45 @@ export default function LoginPage() {
       <main className="flex-1 flex items-center justify-center px-4 pt-24 pb-16">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Welcome back</h1>
-            <p className="text-slate-500 dark:text-[var(--color-text-secondary)]">Sign in to your account to continue</p>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Reset your password</h1>
+            <p className="text-slate-500 dark:text-[var(--color-text-secondary)]">Enter your email and we'll send you a link to choose a new password</p>
           </div>
 
           <div className="bg-white/80 dark:bg-[var(--color-bg-surface)]/80 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200 dark:border-[var(--color-border-subtle)] p-8">
             {error && (
-              <div className="mb-6 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-100 dark:border-red-800/30">
-                {error}
+              <div className="mb-5 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-100 dark:border-red-800/30">{error}</div>
+            )}
+            {success && (
+              <div className="mb-5 p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-sm border border-emerald-100 dark:border-emerald-800/30">
+                <div className="flex items-start gap-3">
+                  <Mail className="w-5 h-5 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium mb-1">Check your email</p>
+                    <p>{success}</p>
+                  </div>
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1.5">Email Address</label>
-                <input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="Enter your email" required />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1.5">Password</label>
-                <div className="relative">
-                  <input id="password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} className={inputCls + ' pr-12'} placeholder="Enter your password" required />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer">
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
+            {!success && (
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-[var(--color-text-secondary)] mb-1.5">Email Address</label>
+                  <input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="Enter your email" required autoFocus />
                 </div>
-              </div>
 
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-[var(--color-text-secondary)] cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                  Remember me
-                </label>
-                <Link to="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">Forgot password?</Link>
-              </div>
+                <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
+                  {loading ? (
+                    <><svg className="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>Sending link...</>
+                  ) : 'Send Reset Link'}
+                </button>
+              </form>
+            )}
 
-              <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
-                {loading ? (
-                  <><svg className="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>Signing in...</>
-                ) : 'Sign In'}
-              </button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-slate-500 dark:text-[var(--color-text-secondary)]">
-              Don't have an account?{' '}
-              <Link to="/signup" className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">Sign up</Link>
-            </p>
+            <Link to="/login" className="mt-6 flex items-center justify-center gap-2 text-sm font-medium text-slate-500 dark:text-[var(--color-text-secondary)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+              <ArrowLeft className="w-4 h-4" />
+              Back to sign in
+            </Link>
           </div>
         </div>
       </main>

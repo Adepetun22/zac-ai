@@ -12,18 +12,49 @@ class SupabaseService {
    * Authentication methods
    */
 
+  // Resolve the public origin of the deployed app, falling back to the
+  // configured backend URL (with any /api suffix stripped) when there is no
+  // browser window (SSR, tests, pre-hydration).
+  getRedirectBase() {
+    return (
+      (typeof window !== 'undefined' && window.location?.origin) ||
+      (import.meta.env.VITE_BACKEND_URL || '').replace(/\/api$/, '').replace(/\/$/, '') ||
+      undefined
+    );
+  }
+
   // Sign up a new user
   async signUp(email, password, name) {
+    // Supabase sends a confirmation email by default, but it needs a
+    // redirect target to build a working link. Without emailRedirectTo the
+    // confirmation flow is dead — the user can never verify their account.
+    const redirectBase = this.getRedirectBase();
+
     const { data, error } = await this.client.auth.signUp({
       email,
       password,
       options: {
         data: { name },
+        emailRedirectTo: redirectBase ? `${redirectBase}/login` : undefined,
       },
     });
-    
+
     if (error) throw error;
     return data;
+  }
+
+  // Send a password reset email. The redirect target is the reset page so the
+  // recovery link lands the user where they can set a new password.
+  async requestPasswordReset(email) {
+    const redirectBase = this.getRedirectBase();
+
+    const { error } = await this.client.auth.resetPasswordForEmail(email, {
+      // The app is a HashRouter, so the route lives in the hash fragment.
+      redirectTo: redirectBase ? `${redirectBase}/#/reset-password` : undefined,
+    });
+
+    if (error) throw error;
+    return { error: null };
   }
 
   // Sign in a user

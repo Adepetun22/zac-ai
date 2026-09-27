@@ -11,6 +11,8 @@ import CollaborationPage from './features/collaboration/CollaborationPage';
 import SettingsPage from './features/settings/SettingsPage';
 import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
+import ForgotPasswordPage from './features/auth/ForgotPasswordPage';
+import ResetPasswordPage from './features/auth/ResetPasswordPage';
 import LandingPage from './features/landing/LandingPage';
 import FeaturesPage from './features/pages/FeaturesPage';
 import HowItWorksPage from './features/pages/HowItWorksPage';
@@ -236,6 +238,21 @@ function App() {
             </PublicRoute>
           }
         />
+        <Route
+          path="/forgot-password"
+          element={
+            <PublicRoute
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+            >
+              <ForgotPasswordPage />
+            </PublicRoute>
+          }
+        />
+        {/* Not wrapped in PublicRoute: the recovery link establishes a session,
+            so isAuthenticated is true and PublicRoute would bounce the user to
+            the dashboard before they can set a new password. */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="/"
           element={
