@@ -45,12 +45,19 @@ class SupabaseService {
 
   // Send a password reset email. The redirect target is the reset page so the
   // recovery link lands the user where they can set a new password.
+  //
+  // NOTE: do NOT put a `#` in here. The app is a HashRouter, but Supabase
+  // appends `?code=<auth_code>` to whatever `redirectTo` you give it. With a
+  // `#` present the `?code=...` is swallowed into the hash fragment and the
+  // client's `parseParametersFromURL` can't read it — the PKCE exchange never
+  // happens and a valid recovery link silently does nothing. Without the `#`
+  // the code stays in the query string, the client exchanges it, and the
+  // HashRouter routes straight to /reset-password.
   async requestPasswordReset(email) {
     const redirectBase = this.getRedirectBase();
 
     const { error } = await this.client.auth.resetPasswordForEmail(email, {
-      // The app is a HashRouter, so the route lives in the hash fragment.
-      redirectTo: redirectBase ? `${redirectBase}/#/reset-password` : undefined,
+      redirectTo: redirectBase ? `${redirectBase}/reset-password` : undefined,
     });
 
     if (error) throw error;

@@ -12,6 +12,24 @@ const NAV_LINKS = [
   { label: 'Advantages', href: '/advantages' },
 ];
 
+// Supabase redirects to the reset page with an error in the URL when the
+// recovery link is invalid or expired — e.g.
+//   /reset-password#error=access_denied&error_code=otp_expired
+// Read it once at render time rather than in an effect, so a blank form is
+// never shown for a failed link.
+const getResetErrorFromURL = () => {
+  if (typeof window === 'undefined') return '';
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('error_code');
+  const description = params.get('error_description');
+  if (code || description) {
+    return description
+      ? `${description.replace(/\+/g, ' ')} (${code || 'unknown'})`
+      : (code || 'This reset link is invalid or has expired.');
+  }
+  return '';
+};
+
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -21,6 +39,7 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasRecoverySession, setHasRecoverySession] = useState(null);
+  const [resetError] = useState(getResetErrorFromURL);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -144,11 +163,17 @@ export default function ResetPasswordPage() {
             {error && (
               <div className="mb-5 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-100 dark:border-red-800/30">{error}</div>
             )}
+            {resetError && (
+              <div className="mb-5 p-4 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 rounded-lg text-sm border border-amber-100 dark:border-amber-800/30">
+                {resetError}
+                <Link to="/forgot-password" className="block mt-2 font-medium underline">Request a new reset link</Link>
+              </div>
+            )}
             {success && (
               <div className="mb-5 p-3 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-sm border border-emerald-100 dark:border-emerald-800/30">{success}</div>
             )}
 
-            {hasRecoverySession === false && (
+            {hasRecoverySession === false && !resetError && (
               <div className="mb-5 p-4 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 rounded-lg text-sm border border-amber-100 dark:border-amber-800/30">
                 This password reset link is invalid or has expired. Reset links are single-use and time-limited.
                 <Link to="/forgot-password" className="block mt-2 font-medium underline">Request a new reset link</Link>
