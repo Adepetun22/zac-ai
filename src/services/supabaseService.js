@@ -1,5 +1,42 @@
 import { supabase } from '../config/supabase';
 
+// sessionStorage key that carries the reason a Supabase email link was
+// rejected. The callback URL is enough for a *valid* link — the router reads
+// the path, so `/reset-password?code=...` routes on its own — but on the
+// failure path GoTrue appends the reason to the fragment and the client may
+// clean that up before the page renders, which would leave the user staring
+// at a blank form. Keeping the reason makes that message reliable.
+const AUTH_ERROR_KEY = 'zac:authError';
+
+const readSessionItem = (key) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    // Storage can be unavailable (private mode, blocked cookies).
+    return null;
+  }
+};
+
+const writeSessionItem = (key, value) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Same as above: the flow still completes and the reason is read from the
+    // URL instead, which is less reliable but still shown to the user.
+  }
+};
+
+const removeSessionItem = (key) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Nothing to clean up when storage is unavailable.
+  }
+};
+
 /**
  * Service class to handle all Supabase operations for the dashboard
  */
@@ -23,11 +60,33 @@ class SupabaseService {
     );
   }
 
+  // Stash why GoTrue rejected a link (expired / already-used recovery or
+  // confirmation link). ResetPasswordPage prefers the reason still on the URL
+  // and falls back to this, so an expired link never renders a blank form.
+  rememberAuthError(message) {
+    writeSessionItem(AUTH_ERROR_KEY, message);
+  }
+
+  readAuthError() {
+    return readSessionItem(AUTH_ERROR_KEY) || '';
+  }
+
+  clearAuthError() {
+    removeSessionItem(AUTH_ERROR_KEY);
+  }
+
   // Sign up a new user
   async signUp(email, password, name) {
     // Supabase sends a confirmation email by default, but it needs a
     // redirect target to build a working link. Without emailRedirectTo the
     // confirmation flow is dead — the user can never verify their account.
+    //
+    // The target deliberately carries no `#`: Supabase appends
+    // `?code=<auth_code>` to it, and a `#` would swallow that query string
+    // into the fragment where the client cannot read it, breaking the PKCE
+    // exchange. The app routes on the path, so the link lands on
+    // `<origin>/login?code=...`, the client exchanges the code there, and
+    // PublicRoute forwards the now-authenticated user to /dashboard.
     const redirectBase = this.getRedirectBase();
 
     const { data, error } = await this.client.auth.signUp({
@@ -46,13 +105,13 @@ class SupabaseService {
   // Send a password reset email. The redirect target is the reset page so the
   // recovery link lands the user where they can set a new password.
   //
-  // NOTE: do NOT put a `#` in here. The app is a HashRouter, but Supabase
-  // appends `?code=<auth_code>` to whatever `redirectTo` you give it. With a
-  // `#` present the `?code=...` is swallowed into the hash fragment and the
-  // client's `parseParametersFromURL` can't read it — the PKCE exchange never
-  // happens and a valid recovery link silently does nothing. Without the `#`
-  // the code stays in the query string, the client exchanges it, and the
-  // HashRouter routes straight to /reset-password.
+  // NOTE: do NOT put a `#` in here. Supabase appends `?code=<auth_code>` to
+  // whatever `redirectTo` you give it; with a `#` present the `?code=...` is
+  // swallowed into the hash fragment, the client's `parseParametersFromURL`
+  // can't read it and the PKCE exchange never happens — a valid recovery link
+  // silently does nothing. Without the `#` the code stays in the query string,
+  // the client exchanges it, and the app routes on the path straight to
+  // `<origin>/reset-password?code=...`, where the new-password form renders.
   async requestPasswordReset(email) {
     const redirectBase = this.getRedirectBase();
 

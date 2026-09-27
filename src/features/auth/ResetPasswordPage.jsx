@@ -12,22 +12,34 @@ const NAV_LINKS = [
   { label: 'Advantages', href: '/advantages' },
 ];
 
-// Supabase redirects to the reset page with an error in the URL when the
-// recovery link is invalid or expired — e.g.
-//   /reset-password#error=access_denied&error_code=otp_expired
-// Read it once at render time rather than in an effect, so a blank form is
-// never shown for a failed link.
+// Supabase reports a rejected link in the URL, and the params are not always in
+// the query string: on the failure path GoTrue appends them to the fragment
+// (e.g. `<origin>/reset-password#error=access_denied&error_code=otp_expired`).
+// The router only reads the path, so the fragment survives and routing lands
+// here on its own. Read both anyway, and fall back to the reason captured at
+// app start in case the client has already cleaned the fragment up.
+//
+// Read once at render time rather than in an effect, so a blank form is never
+// shown for a failed link.
 const getResetErrorFromURL = () => {
   if (typeof window === 'undefined') return '';
   const params = new URLSearchParams(window.location.search);
+  // The fragment carries the callback result (or the rejection reason), never a
+  // route, so the whole of it is safe to parse as params.
+  const hash = window.location.hash || '';
+  if (hash.includes('=')) {
+    new URLSearchParams(hash.replace(/^#/, '')).forEach((value, key) => {
+      if (!params.has(key)) params.set(key, value);
+    });
+  }
   const code = params.get('error_code');
-  const description = params.get('error_description');
+  const description = params.get('error_description') || params.get('error');
   if (code || description) {
     return description
       ? `${description.replace(/\+/g, ' ')} (${code || 'unknown'})`
       : (code || 'This reset link is invalid or has expired.');
   }
-  return '';
+  return supabaseService.readAuthError();
 };
 
 export default function ResetPasswordPage() {
@@ -45,6 +57,14 @@ export default function ResetPasswordPage() {
 
   const navigate = useNavigate();
   const { resetPassword } = useAuthStore();
+
+  // The reason the link was rejected was also stashed at app start, as a
+  // fallback for when the client has already cleaned the fragment up. Drop it
+  // now that it has been read into state, so a later visit is not greeted by a
+  // stale "link expired" banner.
+  useEffect(() => {
+    supabaseService.clearAuthError();
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);

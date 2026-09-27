@@ -3,6 +3,37 @@ import { supabase } from '../config/supabase';
 import supabaseService from '../services/supabaseService';
 import useNotificationStore from './notificationStore';
 
+// Params Supabase puts on an auth-callback URL. They must be read BEFORE the
+// first `supabase.auth` call: the client strips `?code=` from the query string
+// with `history.replaceState` during its own initialize(), and on the failure
+// path the params live in the hash instead. The router only looks at the path,
+// so the fragment is free to carry the auth result — but read it anyway, since
+// nothing in the app is guaranteed to have cleaned it up.
+const readCallbackParams = () => {
+  if (typeof window === 'undefined') return {};
+  const params = {};
+  const merge = (source) => {
+    source.forEach((value, key) => {
+      if (!(key in params)) params[key] = value;
+    });
+  };
+  merge(new URLSearchParams(window.location.search));
+  const hash = window.location.hash || '';
+  // The fragment carries the callback result, never a route, so the whole of
+  // it is safe to parse as params.
+  if (hash.includes('=')) merge(new URLSearchParams(hash.replace(/^#/, '')));
+  return params;
+};
+
+// Human-readable reason a link was rejected, or '' when the callback is fine.
+const describeCallbackError = (params) => {
+  const code = params.error_code || '';
+  const description = (params.error_description || params.error || '').replace(/\+/g, ' ');
+  if (!code && !description) return '';
+  if (description && code) return `${description} (${code})`;
+  return description || code || 'This link is invalid or has expired.';
+};
+
 // Load the user's profile from the `profiles` table and merge the name
 // into the auth user object. If no profile row exists yet (e.g. the user
 // was created before the auto-create trigger), we upsert one.
@@ -93,30 +124,37 @@ const useAuthStore = create((set, get) => ({
       return;
     }
     
+    // Stash why GoTrue rejected the link, while the reason is still on the URL.
+    // The router only reads the path, so the fragment survives navigation, but
+    // the client is free to clean it up and the page cannot render a blank form
+    // for a rejected link — remember the reason as a fallback.
+    const callbackError = describeCallbackError(readCallbackParams());
+    if (callbackError) supabaseService.rememberAuthError(callbackError);
+
     // Get initial session
     const { data: { session } } = await supabase.auth.getSession();
-    
+
     if (session) {
       const user = await loadProfileIntoUser(session.user);
-      set({ 
-        user, 
-        isAuthenticated: true, 
-        isLoading: false 
+      set({
+        user,
+        isAuthenticated: true,
+        isLoading: false
       });
     } else {
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
-    
+
     // Listen for auth changes
     const { data: { subscription } } = await supabase.auth.onAuthStateChange(
       async (event, session) => {
         const user = session?.user ? await loadProfileIntoUser(session.user) : null;
-        set({ 
+        set({
           user,
           isAuthenticated: !!session,
           isLoading: false
         });
-        
+
         if (event === 'SIGNED_IN' && session) {
           get().resetSessionTimer();
         } else if (event === 'SIGNED_OUT') {

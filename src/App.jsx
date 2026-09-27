@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { LiveblocksProvider } from '@liveblocks/react';
 
 import Header from './components/Header';
@@ -50,10 +50,12 @@ const PublicRoute = ({ children, isLoading, isAuthenticated }) => {
   return !isAuthenticated ? children : <Navigate to="/dashboard" />;
 };
 
-// Header component with location awareness using window.location
+// Header component with location awareness from react-router
 const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick, connectedUsers = [] }) => {
-  // Check if we're on the collaboration page using window.location
-  const isOnCollaborationPage = window.location.hash.includes('/collaboration');
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // Route-aware, so the indicator reacts to navigation instead of only to mount
+  const isOnCollaborationPage = pathname === '/collaboration';
   
   // Adjust collaboration status based on the current route
   const currentCollaborationStatus = isOnCollaborationPage 
@@ -67,22 +69,22 @@ const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarC
       onNavigate={(page) => {
         switch(page) {
           case 'dashboard':
-            window.location.hash = '#/dashboard';
+            navigate('/dashboard');
             break;
           case 'analytics':
-            window.location.hash = '#/analytics';
+            navigate('/analytics');
             break;
           case 'ai-models':
-            window.location.hash = '#/ai-models';
+            navigate('/ai-models');
             break;
           case 'collaboration':
-            window.location.hash = '#/collaboration';
+            navigate('/collaboration');
             break;
           case 'settings':
-            window.location.hash = '#/settings';
+            navigate('/settings');
             break;
           case 'login':
-            window.location.hash = '#/login';
+            navigate('/login');
             break;
           default:
             break;
@@ -96,7 +98,15 @@ const HeaderWithLocation = ({ collaborationStatus, sidebarCollapsed, setSidebarC
 };
 
 // Main authenticated layout component
-const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, handleCollaborateClick, connectedUsers = [] }) => {
+const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebarCollapsed, connectedUsers = [] }) => {
+  // Owned here rather than in App: AuthenticatedLayout is rendered as a route
+  // element, so it sits inside the Router and can use useNavigate(). App builds
+  // the Router itself and therefore cannot.
+  const navigate = useNavigate();
+  const handleCollaborateClick = useCallback(() => {
+    navigate('/collaboration');
+  }, [navigate]);
+
   return (
     <div className="flex h-screen bg-slate-50">
       <Sidebar
@@ -308,9 +318,6 @@ function App() {
                 collaborationStatus={collaborationStatus}
                 sidebarCollapsed={sidebarCollapsed}
                 setSidebarCollapsed={setSidebarCollapsed}
-                handleCollaborateClick={useCallback(() => {
-                  window.location.hash = '#/collaboration';
-                }, [])}
                 connectedUsers={others}
               />
             </ProtectedRoute>
