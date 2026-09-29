@@ -21,7 +21,7 @@ const ADVANTAGES = [
     title: 'Secure by default',
     desc: 'Enterprise-grade auth, row-level security, and encrypted storage keep your data protected at every layer.',
     color: 'from-sky-500 to-blue-600',
-    detail: 'Powered by Supabase with RLS policies, OAuth 2.0, magic links, and AES-256 encrypted API key storage.',
+    detail: 'Enterprise-grade infrastructure with RLS policies, OAuth 2.0, magic links, and AES-256 encrypted API key storage.',
   },
   {
     icon: Globe,

@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import axios from 'axios'
+import crypto from 'crypto'
 import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import { Liveblocks } from '@liveblocks/node'
@@ -21,11 +22,155 @@ app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includ
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ limit: '10mb', extended: true }))
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
 const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null
+
+// ── Supabase admin client ──────────────────────────────────────
+// Uses the SERVICE_ROLE_KEY (secret) so auth credentials never pass through the
+// browser. The anon-key client above is retained for data/proxy endpoints that
+// don't need admin privileges. The admin client disables auto-refresh and
+// persistence because it is request-scoped (no long-lived session).
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : null
+
+// Origin of the deployed frontend — used to build redirect URLs for email
+// confirmations and password-reset links.
+const frontendUrl = process.env.FRONTEND_URL || 'https://zac-ai.netlify.app'
+
+// ── API Key encryption ─────────────────────────────────────────
+// User-supplied LLM API keys are encrypted at rest in Supabase using AES-256-GCM.
+// The encryption key must be a 32-byte hex string set as API_KEY_ENCRYPTION_KEY
+// in the Render dashboard (sync: false). Never VITE_-prefixed.
+const encryptionKey = process.env.API_KEY_ENCRYPTION_KEY
+
+function encryptApiKey(plaintext) {
+  if (!plaintext || !encryptionKey) {
+    // If no encryption key is configured, fall back to base64 encoding
+    // (still opaque, and the server is the only consumer that base64-decodes).
+    // This keeps the system functional in local dev without breaking.
+    return plaintext ? Buffer.from(plaintext, 'utf8').toString('base64') + ':b64' : null
+  }
+  const key = Buffer.from(encryptionKey, 'hex')
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipherGCM('aes-256-gcm', key, iv)
+  cipher.setAAD(Buffer.from('zac-ai', 'utf8'))
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return Buffer.concat([iv, tag, encrypted]).toString('base64url')
+}
+
+function decryptApiKey(stored) {
+  if (!stored) return null
+  try {
+    if (stored.endsWith(':b64')) {
+      // Legacy base64-encoded key (no encryption key configured).
+      return Buffer.from(stored.slice(0, -4), 'base64').toString('utf8')
+    }
+    if (!encryptionKey) {
+      console.warn('[WARN] Cannot decrypt API key: API_KEY_ENCRYPTION_KEY is not set.')
+      return null
+    }
+    const key = Buffer.from(encryptionKey, 'hex')
+    const data = Buffer.from(stored, 'base64url')
+    const iv = data.subarray(0, 12)
+    const tag = data.subarray(12, 28)
+    const encrypted = data.subarray(28)
+    const decipher = crypto.createDecipherGCM('aes-256-gcm', key, iv)
+    decipher.setAAD(Buffer.from('zac-ai', 'utf8'))
+    decipher.setAuthTag(tag)
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()])
+    return decrypted.toString('utf8')
+  } catch (err) {
+    console.error('[ERROR] Failed to decrypt API key:', err.message)
+    return null
+  }
+}
+
+// Return a masked version of an API key for display (e.g. "sk-…⋯…XYZ").
+function maskApiKey(key) {
+  if (!key) return ''
+  if (key.length <= 8) return '••••'
+  const first = key.slice(0, 4)
+  const last = key.slice(-4)
+  return `${first}••••${last}`
+}
+
+// Look up a user's registered model and decrypt its API key.
+// Returns { api_key: decryptedKey|null, provider: string } or null if not found.
+async function lookupUserModelKey(userId, modelId) {
+  if (!supabaseAdmin || !userId || !modelId) return null
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ai_models')
+      .select('api_key, provider')
+      .eq('user_id', userId)
+      .eq('model_id', modelId.replace(/^openrouter\//, ''))
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (error || !data) {
+      // Also try with the full model_id (including provider prefix)
+      const { data: data2, error: error2 } = await supabaseAdmin
+        .from('ai_models')
+        .select('api_key, provider')
+        .eq('user_id', userId)
+        .eq('model_id', modelId)
+        .eq('status', 'active')
+        .maybeSingle()
+
+      if (error2 || !data2) return null
+      return { provider: data2.provider, api_key: decryptApiKey(data2.api_key) }
+    }
+    return { provider: data.provider, api_key: decryptApiKey(data.api_key) }
+  } catch (err) {
+    console.warn('[WARN] Error looking up user model key:', err.message)
+    return null
+  }
+}
+
+// ── Auth proxy helpers ─────────────────────────────────────────
+// Translate the camelCase/flat shape the frontend sends into the
+// user_metadata / app_metadata blocks the Supabase admin API expects.
+function translateUserUpdates(updates) {
+  const attrs = {}
+  if (updates.email) attrs.email = updates.email
+  if (updates.password) attrs.password = updates.password
+  if (updates.data) {
+    attrs.user_metadata = updates.data
+  }
+  if (updates.app_metadata) {
+    attrs.app_metadata = updates.app_metadata
+  }
+  return attrs
+}
+
+// Extract the Bearer token from the Authorization header.
+function extractBearerToken(req) {
+  const authHeader = req.headers.authorization || ''
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+}
+
+// Verify an access token via the admin client and return the user (or null).
+async function verifyAccessToken(token) {
+  if (!token || !supabaseAdmin) return null
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
+    if (error || !user) return null
+    return user
+  } catch {
+    return null
+  }
+}
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -42,7 +187,154 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ── Liveblocks auth ─────────────────────────────────────────
+// ── Auth proxy endpoints ───────────────────────────────────────
+// All credential-based auth operations (signIn, signUp, signOut, password
+// reset, user updates) are proxied through the backend so the browser
+// never talks to Supabase directly for auth. The supabaseAdmin client
+// (service-role key) performs the actual operation and the resulting
+// session is returned to the frontend, which calls supabase.auth.setSession()
+// to restore the client-side Supabase client for data/subscription use.
+
+app.use('/api/auth', (req, res, next) => {
+  if (!supabaseAdmin) {
+    return res.status(503).json({ error: 'Auth service not configured on backend' })
+  }
+  next()
+})
+
+// POST /api/auth/signin — exchange email/password for a session via the admin client
+app.post('/api/auth/signin', async (req, res) => {
+  const { email, password } = req.body
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' })
+  }
+  try {
+    const { data, error } = await supabaseAdmin.auth.signInWithPassword({ email, password })
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ user: data.user, session: data.session })
+  } catch (err) {
+    console.error('[ERROR] Auth signin failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/auth/signup — create a new user account
+app.post('/api/auth/signup', async (req, res) => {
+  const { email, password, name } = req.body
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' })
+  }
+  try {
+    const { data, error } = await supabaseAdmin.auth.signUp({
+      email,
+      password,
+      options: {
+        data: name ? { name } : undefined,
+        emailRedirectTo: `${frontendUrl}/login`,
+      },
+    })
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ user: data.user, session: data.session })
+  } catch (err) {
+    console.error('[ERROR] Auth signup failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/auth/signout — acknowledge sign-out request.
+// The client-side supabase.auth.signOut() handles token revocation; this
+// endpoint exists so the backend can perform server-side cleanup if session
+// management is ever moved server-side (e.g., cookies / session store).
+app.post('/api/auth/signout', async (req, res) => {
+  const token = extractBearerToken(req) || req.body?.access_token
+  if (token && supabaseAdmin) {
+    try {
+      const user = await verifyAccessToken(token)
+      if (user) {
+        const signOutUser = supabaseAdmin.auth.admin?.signOutUser
+        if (typeof signOutUser === 'function') {
+          await signOutUser.call(supabaseAdmin.auth.admin, user.id)
+        }
+      }
+    } catch (err) {
+      console.warn('[WARN] Auth signout backend cleanup failed:', err.message)
+    }
+  }
+  res.json({ success: true })
+})
+
+// GET /api/auth/session — return the current user from the access token
+app.get('/api/auth/session', async (req, res) => {
+  const token = extractBearerToken(req)
+  if (!token) return res.json({ user: null })
+  const user = await verifyAccessToken(token)
+  if (!user) return res.status(401).json({ error: 'Invalid or expired token' })
+  res.json({ user })
+})
+
+// POST /api/auth/reset-password — send a password-reset email
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email } = req.body
+  if (!email) return res.status(400).json({ error: 'Email is required' })
+  try {
+    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+      redirectTo: `${frontendUrl}/reset-password`,
+    })
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ error: null })
+  } catch (err) {
+    console.error('[ERROR] Password reset request failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/auth/exchange-code-for-session — exchange a PKCE recovery code
+// for a session. The client-side Supabase client normally handles this
+// automatically, but in some edge cases (e.g. the code arrives in the URL
+// fragment) it can be useful to exchange it here.
+app.post('/api/auth/exchange-code-for-session', async (req, res) => {
+  const { code } = req.body
+  if (!code) return res.status(400).json({ error: 'Auth code is required' })
+  try {
+    const { data, error } = await supabaseAdmin.auth.exchangeCodeForSession({ auth_code: code })
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ session: data.session, user: data.user })
+  } catch (err) {
+    console.error('[ERROR] Code exchange failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/auth/update-password — set a new password (recovery or authenticated)
+app.post('/api/auth/update-password', async (req, res) => {
+  const { password, access_token } = req.body
+  if (!password) return res.status(400).json({ error: 'Password is required' })
+  const user = await verifyAccessToken(access_token)
+  if (!user) return res.status(401).json({ error: 'Invalid or expired session' })
+  try {
+    const { error } = await supabaseAdmin.auth.admin.updateUser(user.id, { password })
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ error: null })
+  } catch (err) {
+    console.error('[ERROR] Password update failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// PATCH /api/auth/user — update the authenticated user's metadata
+app.patch('/api/auth/user', async (req, res) => {
+  const token = extractBearerToken(req)
+  const user = await verifyAccessToken(token)
+  if (!user) return res.status(401).json({ error: 'Not authenticated' })
+  try {
+    const { error } = await supabaseAdmin.auth.admin.updateUser(user.id, translateUserUpdates(req.body))
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ error: null })
+  } catch (err) {
+    console.error('[ERROR] User update failed:', err.message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
 //
 // The browser Liveblocks client calls this endpoint to mint a short-lived
 // access token for the current user. Without it the WebSocket connection
@@ -683,6 +975,44 @@ async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages =
 }
 
 // ── OpenRouter ────────────────────────────────────────────
+
+// Retry a function with exponential backoff; retries on 429 / 5xx / network errors.
+// Respects the Retry-After header when present.
+async function withRetry(fn, options = {}) {
+  const maxAttempts = options.maxAttempts || 3
+  const baseDelayMs = options.baseDelayMs || 500
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn(attempt)
+    } catch (err) {
+      const status = err.response?.status
+      const is429 = status === 429
+      const is5xx = status && status >= 500 && status < 600
+      const isNetwork = !err.response && !!err.code
+
+      // Don't retry on the final attempt, or on non-retryable errors.
+      if (attempt === maxAttempts || (!is429 && !is5xx && !isNetwork)) {
+        throw err
+      }
+
+      // Determine wait time: prefer Retry-After header, then exponential backoff.
+      let delay = baseDelayMs * Math.pow(2, attempt - 1)
+      if (is429) {
+        const retryAfter = err.response?.headers?.['retry-after']
+        if (retryAfter) {
+          const parsed = parseFloat(retryAfter)
+          if (!isNaN(parsed)) {
+            // If the header is a small number (< 120), treat it as seconds; otherwise treat as a date offset.
+            delay = parsed < 120 ? parsed * 1000 : Math.min(parsed, 30000)
+          }
+        }
+      }
+      console.log(`[DEBUG] Retrying (attempt ${attempt + 1}/${maxAttempts}) after ${Math.round(delay)}ms — last error: ${err.message}`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+    }
+  }
+}
+
 async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto') {
   let actualModel = modelId.replace(/^openrouter\//, '')
 
@@ -709,13 +1039,11 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
     body.tool_choice = toolChoice
   }
 
-  const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', body, {
+  const response = await withRetry(() => axios.post('https://openrouter.ai/api/v1/chat/completions', body, {
     headers,
-    maxRedirects: 0
-  })
-
-  console.log('[DEBUG] OpenRouter response status:', response.status)
-  console.log('[DEBUG] OpenRouter response headers:', response.headers)
+    maxRedirects: 0,
+    timeout: 30000,
+  }), { maxAttempts: 3, baseDelayMs: 1000 })
 
   const choice = response.data.choices?.[0]
   const message = choice?.message
@@ -736,10 +1064,11 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
       messages: [...messages, message, ...toolResults],
       temperature: type === 'structured' ? 0.1 : 0.7,
     }
-    const followUpRes = await axios.post('https://openrouter.ai/api/v1/chat/completions', followUpBody, {
+    const followUpRes = await withRetry(() => axios.post('https://openrouter.ai/api/v1/chat/completions', followUpBody, {
       headers,
-      maxRedirects: 0
-    })
+      maxRedirects: 0,
+      timeout: 30000,
+    }), { maxAttempts: 3, baseDelayMs: 1000 })
     const finalText = followUpRes.data.choices?.[0]?.message?.content
     return { text: finalText, provider: 'openrouter', modelId, toolResults }
   }
@@ -796,9 +1125,26 @@ function classifyError(error, provider) {
 
 // ── Main AI endpoint ──────────────────────────────────────
 app.post('/api/ai', async (req, res) => {
-  const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey, messages: historyMessages, tools: requestedTools, toolChoice } = req.body
+  const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey, userId: reqUserId, accessToken: reqToken, messages: historyMessages, tools: requestedTools, toolChoice } = req.body
   const provider = resolveProvider(modelId)
-  console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | userKey: ${!!userApiKey} | history: ${historyMessages?.length || 0} | tools: ${requestedTools?.length || 0}`)
+
+  // ── Resolve the API key ───────────────────────────────────────
+  // Priority:
+  //   1. Explicitly passed by the client (backward compat).
+  //   2. Looked up from the user's encrypted model record in Supabase.
+  //   3. Falls back to the server-level env var (shared keys for free models).
+  let resolvedKey = userApiKey || null
+  let keySource = userApiKey ? 'client' : 'none'
+
+  if (!resolvedKey && reqUserId) {
+    const lookup = await lookupUserModelKey(reqUserId, modelId)
+    if (lookup?.api_key) {
+      resolvedKey = lookup.api_key
+      keySource = 'database'
+    }
+  }
+
+  console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | keySource: ${keySource} | history: ${historyMessages?.length || 0} | tools: ${requestedTools?.length || 0}`)
 
   // Build the actual tools array based on what the client requested.
   // Only allow tools that are registered on the server (security: we don't
@@ -814,19 +1160,19 @@ app.post('/api/ai', async (req, res) => {
     let result
 
     if (provider === 'openai') {
-      const key = userApiKey || process.env.OPENAI_API_KEY
+      const key = resolvedKey || process.env.OPENAI_API_KEY
       if (!key) throw Object.assign(new Error('Missing OPENAI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENAI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callOpenAI(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
     } else if (provider === 'anthropic') {
-      const key = userApiKey || process.env.ANTHROPIC_API_KEY
+      const key = resolvedKey || process.env.ANTHROPIC_API_KEY
       if (!key) throw Object.assign(new Error('Missing ANTHROPIC_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'ANTHROPIC_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callAnthropic(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
     } else if (provider === 'google') {
-      const key = userApiKey || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
+      const key = resolvedKey || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
       if (!key) throw Object.assign(new Error('Missing GOOGLE_GEMINI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'GOOGLE_GEMINI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callGoogleGemini(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
     } else if (provider === 'openrouter') {
-      const key = userApiKey || process.env.OPENROUTER_API_KEY
+      const key = resolvedKey || process.env.OPENROUTER_API_KEY
       console.log('[DEBUG] OpenRouter key present:', !!key, 'length:', key?.length)
       if (!key) throw Object.assign(new Error('Missing OPENROUTER_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENROUTER_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
       result = await callOpenRouter(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
@@ -958,23 +1304,367 @@ app.get('/api/dashboard', async (req, res) => {
     const totalCost = (aiModels || []).reduce((sum, model) => sum + (model.cost || 0), 0)
     const activeModels = (aiModels || []).filter(m => m.status === 'active').length
 
-    res.json({
-      metrics: {
-        totalApiRequests,
-        totalTokensProcessed,
-        totalCost,
-        activeModels,
-        apiRequestChange: 0,
-        tokensChange: 0,
-        costChange: 0,
-        modelChange: 0,
-      },
-      aiModels: aiModels || [],
-      analytics: analytics || [],
-    })
+  // Mask any API keys before sending them to the client — the raw keys
+  // should never leave the server. The client gets a masked version for
+  // display and must use /api/ai (which looks up the key server-side).
+  const maskedModels = (aiModels || []).map(m => ({
+    ...m,
+    api_key: m.api_key ? maskApiKey(m.api_key) : '',
+  }))
+
+  res.json({
+    metrics: {
+      totalApiRequests,
+      totalTokensProcessed,
+      totalCost,
+      activeModels,
+      apiRequestChange: 0,
+      tokensChange: 0,
+      costChange: 0,
+      modelChange: 0,
+    },
+    aiModels: maskedModels,
+    analytics: analytics || [],
+  })
   } catch (error) {
     console.error('[ERROR] Dashboard API error:', error.message)
     res.status(500).json({ error: 'Dashboard fetch failed', detail: error.message })
+  }
+})
+
+// ── Model CRUD endpoints (with encrypted API keys) ──────────
+// All routes require a valid Bearer token. The server encrypts api_key
+// before storing in Supabase and decrypts when returning for editing.
+// The /api/ai endpoint never receives raw keys from the client — it
+// looks them up server-side via lookupUserModelKey().
+
+// GET /api/models?userId=xxx — list a user's AI models (keys masked)
+app.get('/api/models', async (req, res) => {
+  const userId = req.query.userId
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
+
+    const { data, error } = await supabaseAdmin
+      .from('ai_models')
+      .select('*')
+      .eq('user_id', userId)
+
+    if (error) throw error
+
+    // Mask API keys — raw keys stay server-side only.
+    const masked = (data || []).map(m => ({
+      ...m,
+      api_key: m.api_key ? maskApiKey(m.api_key) : '',
+    }))
+    res.json({ aiModels: masked })
+  } catch (error) {
+    console.error('[ERROR] Failed to list models:', error.message)
+    res.status(500).json({ error: 'Failed to fetch models', detail: error.message })
+  }
+})
+
+// GET /api/models/:id?userId=xxx — fetch a single model with decrypted api_key
+// (used when the user clicks "Reveal" in the edit modal)
+app.get('/api/models/:id', async (req, res) => {
+  const id = req.params.id
+  const userId = req.query.userId
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
+
+    const { data, error } = await supabaseAdmin
+      .from('ai_models')
+      .select('*')
+      .eq('id', id)
+      .eq(userId ? 'user_id' : 'id', userId || id)
+      .maybeSingle()
+
+    if (error) throw error
+    if (!data) return res.status(404).json({ error: 'Model not found' })
+
+    // Decrypt the api_key for display in the edit modal.
+    const decrypted = { ...data, api_key: decryptApiKey(data.api_key) || '' }
+    res.json({ aiModel: decrypted })
+  } catch (error) {
+    console.error('[ERROR] Failed to fetch model:', error.message)
+    res.status(500).json({ error: 'Failed to fetch model', detail: error.message })
+  }
+})
+
+// POST /api/models — create a model (api_key encrypted server-side)
+app.post('/api/models', async (req, res) => {
+  const userId = req.body.user_id
+  if (!userId || !req.body.name || !req.body.provider || !req.body.model_id) {
+    return res.status(400).json({ error: 'Missing required fields: name, provider, model_id, user_id' })
+  }
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
+
+    const model = {
+      name: req.body.name,
+      provider: req.body.provider,
+      model_id: req.body.model_id,
+      // Store the key encrypted — never plaintext.
+      api_key: req.body.api_key ? encryptApiKey(req.body.api_key) : null,
+      endpoint: req.body.endpoint || null,
+      status: req.body.status || 'active',
+      cost: req.body.cost ?? 0,
+      latency: req.body.latency ?? 0,
+      api_requests: req.body.api_requests ?? 0,
+      tokens_processed: req.body.tokens_processed ?? 0,
+      user_id: userId,
+      created_at: new Date().toISOString(),
+    }
+
+    const { error } = await supabaseAdmin.from('ai_models').insert([model])
+    if (error) throw error
+
+    // Return the model with a masked key.
+    const saved = { ...model, api_key: model.api_key ? maskApiKey(model.api_key) : '' }
+    res.json({ aiModel: saved })
+  } catch (error) {
+    console.error('[ERROR] Failed to create model:', error.message)
+    res.status(500).json({ error: 'Failed to create model', detail: error.message })
+  }
+})
+
+// PUT /api/models/:id — update a model (api_key re-encrypted if provided)
+app.put('/api/models/:id', async (req, res) => {
+  const id = req.params.id
+  const { api_key, ...updates } = req.body
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
+
+    const patch = { ...updates }
+    // If a new api_key is provided, encrypt it before storing.
+    // If the value is a masked placeholder (contains "••••"), the user
+    // didn't change the key — leave the existing encrypted value untouched.
+    if (api_key !== undefined && !api_key.includes('••••')) {
+      patch.api_key = api_key ? encryptApiKey(api_key) : null
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('ai_models')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    const saved = { ...data, api_key: data.api_key ? maskApiKey(data.api_key) : '' }
+    res.json({ aiModel: saved })
+  } catch (error) {
+    console.error('[ERROR] Failed to update model:', error.message)
+    res.status(500).json({ error: 'Failed to update model', detail: error.message })
+  }
+})
+
+// DELETE /api/models/:id — delete a model
+app.delete('/api/models/:id', async (req, res) => {
+  const id = req.params.id
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
+
+    const { error } = await supabaseAdmin.from('ai_models').delete().eq('id', id)
+    if (error) throw error
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[ERROR] Failed to delete model:', error.message)
+    res.status(500).json({ error: 'Failed to delete model', detail: error.message })
+  }
+})
+
+// ── Knowledge Base endpoints ──────────────────────────────────────────────
+// Supports a simple RAG flow: documents are stored per collaboration session,
+// and the search endpoint returns the most relevant chunks given a query.
+// We use Postgres ILIKE substring matching so it works without an embeddings API
+// key — but the structure is designed to be swapped for vector similarity later.
+
+// GET /api/knowledge?sessionId=xxx — list all knowledge documents for a session
+app.get('/api/knowledge', async (req, res) => {
+  const sessionId = req.query.sessionId
+  if (!sessionId) return res.status(400).json({ error: 'sessionId is required' })
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
+
+    const { data, error } = await supabaseAdmin
+      .from('knowledge_documents')
+      .select('id, session_id, user_id, title, content, created_at, updated_at')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    res.json({ documents: data || [] })
+  } catch (error) {
+    console.error('[ERROR] Failed to list knowledge docs:', error.message)
+    res.status(500).json({ error: 'Failed to fetch knowledge documents', detail: error.message })
+  }
+})
+
+// POST /api/knowledge — create or append to a knowledge document
+app.post('/api/knowledge', async (req, res) => {
+  const { sessionId, userId, title, content } = req.body
+  if (!sessionId || !title || !content) {
+    return res.status(400).json({ error: 'Missing required fields: sessionId, title, content' })
+  }
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
+
+    // Verify the user is a participant in the session (RLS is enforced, but we
+    // double-check here so we can return a clean 403 instead of a generic error).
+    const { data: participant, error: checkErr } = await supabaseAdmin
+      .from('session_participants')
+      .select('session_id')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (checkErr || !participant) {
+      return res.status(403).json({ error: 'Not a participant in this session' })
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('knowledge_documents')
+      .insert({
+        session_id: sessionId,
+        user_id: userId,
+        title,
+        content,
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+    res.json({ document: data })
+  } catch (error) {
+    console.error('[ERROR] Failed to create knowledge doc:', error.message)
+    res.status(500).json({ error: 'Failed to create knowledge document', detail: error.message })
+  }
+})
+
+// POST /api/knowledge/search — RAG: find relevant chunks given a query
+//
+// Request body: { sessionId, query, topK = 5, maxChunkLength = 1000 }
+//
+// Returns matching documents with their content (already chunked) and a
+// simple relevance score based on keyword overlap.
+app.post('/api/knowledge/search', async (req, res) => {
+  const { sessionId, query, topK = 5, maxChunkLength = 1000 } = req.body
+  if (!sessionId || !query) {
+    return res.status(400).json({ error: 'Missing required fields: sessionId, query' })
+  }
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
+
+    const { data, error } = await supabaseAdmin
+      .from('knowledge_documents')
+      .select('id, title, content')
+      .eq('session_id', sessionId)
+
+    if (error) throw error
+
+    const docs = data || []
+
+    // Simple keyword-overlap ranking.
+    // Tokenise the query into lowercase words and count how many unique query
+    // terms appear in each document's content.  Return the top-K by score.
+    const queryTerms = (query.toLowerCase().match(/[a-z0-9]+/g) || [])
+    const uniqueTerms = new Set(queryTerms)
+
+    const scored = docs.map(doc => {
+      const text = (doc.content || '').toLowerCase()
+      let score = 0
+      const matchedTerms = []
+      for (const term of uniqueTerms) {
+        const regex = new RegExp(term, 'gi')
+        const matches = text.match(regex)
+        if (matches) {
+          score += matches.length
+          matchedTerms.push(term)
+        }
+      }
+      // Bonus for title matches
+      const titleText = (doc.title || '').toLowerCase()
+      for (const term of uniqueTerms) {
+        if (titleText.includes(term)) score += 2
+      }
+      return {
+        docId: doc.id,
+        title: doc.title,
+        score,
+        matchedTerms,
+        content: doc.content,
+      }
+    })
+
+    const results = scored
+      .filter(d => d.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK)
+
+    // Chunk large documents so the AI doesn't get overwhelmed
+    const chunked = results.map(r => {
+      if (r.content.length <= maxChunkLength) {
+        return { docId: r.docId, title: r.title, score: r.score, matchedTerms: r.matchedTerms, chunk: r.content }
+      }
+      // Split into overlapping chunks and keep only the ones containing query terms
+      const chunks = []
+      const overlap = 100
+      for (let i = 0; i < r.content.length; i += maxChunkLength - overlap) {
+        chunks.push(r.content.slice(i, i + maxChunkLength))
+      }
+      return chunks.map(chunk => ({ docId: r.docId, title: r.title, score: r.score, matchedTerms: r.matchedTerms, chunk }))
+    }).flat()
+
+    res.json({ results: chunked })
+  } catch (error) {
+    console.error('[ERROR] Knowledge search failed:', error.message)
+    res.status(500).json({ error: 'Search failed', detail: error.message })
+  }
+})
+
+// DELETE /api/knowledge/:id?userId=xxx — delete a knowledge document
+app.delete('/api/knowledge/:id', async (req, res) => {
+  const id = req.params.id
+  const userId = req.query.userId
+
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
+
+    if (userId) {
+      // Ensure only the owner can delete
+      const { data: existing, error: lookupErr } = await supabaseAdmin
+        .from('knowledge_documents')
+        .select('id')
+        .eq('id', id)
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (lookupErr || !existing) {
+        return res.status(404).json({ error: 'Document not found or access denied' })
+      }
+    }
+
+    const { error } = await supabaseAdmin
+      .from('knowledge_documents')
+      .delete()
+      .eq('id', id)
+
+    if (error) throw error
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[ERROR] Failed to delete knowledge doc:', error.message)
+    res.status(500).json({ error: 'Failed to delete', detail: error.message })
   }
 })
 

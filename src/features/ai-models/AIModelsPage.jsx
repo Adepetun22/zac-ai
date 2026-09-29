@@ -3,6 +3,7 @@ import { Search, Plus, Edit, Trash2, Play, X, Check } from 'lucide-react';
 import useDashboardStore from '../../store/dashboardStore';
 import useAuthStore from '../../store/authStore';
 import { useNotification } from '../../components/useNotification';
+import supabaseService from '../../services/supabaseService';
 
 function ModelRowActions({ model, onRun, onEdit, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -78,7 +79,7 @@ const PROVIDER_KEY_LABELS = {
   Custom: 'API Key',
 }
 
-function ModelModal({ model, onClose, onSave }) {
+function ModelModal({ model, onClose, onSave, userId }) {
   const [form, setForm] = useState({
     name: model?.name || '',
     provider: model?.provider || 'OpenAI',
@@ -90,6 +91,7 @@ function ModelModal({ model, onClose, onSave }) {
     latency: model?.latency ?? 0,
   });
   const [showKey, setShowKey] = useState(false);
+  const [isRevealing, setIsRevealing] = useState(false);
 
   const modelIdOptions = PROVIDER_MODEL_IDS[form.provider] || [];
 
@@ -182,17 +184,43 @@ function ModelModal({ model, onClose, onSave }) {
                 value={form.api_key}
                 onChange={(e) => setForm({ ...form, api_key: e.target.value })}
                 placeholder="Paste your API key here"
-                className={inputCls + ' pr-16'}
+                className={inputCls + ' pr-28'}
               />
-              <button
-                type="button"
-                onClick={() => setShowKey(v => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 cursor-pointer px-1"
-              >
-                {showKey ? 'Hide' : 'Show'}
-              </button>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {model?.id && form.api_key?.includes('••••') && !showKey && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsRevealing(true);
+                      try {
+                        const decrypted = await supabaseService.getAiModelBackend(model.id, userId);
+                        if (decrypted?.api_key) {
+                          setForm(f => ({ ...f, api_key: decrypted.api_key }));
+                          setShowKey(true);
+                        }
+                      } catch (err) {
+                        console.error('Failed to reveal key:', err.message);
+                      } finally {
+                        setIsRevealing(false);
+                      }
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-600 cursor-pointer px-1 disabled:opacity-50"
+                    title="Reveal the actual key from the server"
+                    disabled={isRevealing}
+                  >
+                    {isRevealing ? 'Revealing…' : 'Reveal'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowKey(v => !v)}
+                  className="text-xs text-slate-400 hover:text-slate-600 cursor-pointer px-1"
+                >
+                  {showKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-slate-400 mt-1">Stored in your account. Used only for your requests.</p>
+            <p className="text-xs text-slate-400 mt-1">Encrypted at rest. Used only for your requests.</p>
           </div>
 
           {/* Custom endpoint — only shown for Custom provider */}
@@ -284,7 +312,7 @@ export default function AIModelsPage() {
 
   const handleRun = async (model) => {
     try {
-      const response = await generateAIResponse("Say hello in a professional manner", model.id);
+      const response = await generateAIResponse("Say hello in a professional manner", model.id, user?.id);
       const preview = typeof response === 'string'
         ? response.substring(0, 80)
         : JSON.stringify(response).substring(0, 80);
@@ -377,6 +405,7 @@ export default function AIModelsPage() {
       {modalOpen && (
         <ModelModal
           model={editingModel}
+          userId={user?.id}
           onClose={() => { setModalOpen(false); setEditingModel(null); }}
           onSave={handleSave}
         />

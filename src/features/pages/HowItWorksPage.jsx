@@ -58,11 +58,11 @@ const FAQS = [
   },
   {
     q: 'How does real-time collaboration work?',
-    a: 'We use WebSockets and Supabase Realtime to sync cursor positions, widget changes, and new charts across all connected users with ~50ms latency.',
+    a: 'We use WebSockets and real-time infrastructure to sync cursor positions, widget changes, and new charts across all connected users with ~50ms latency.',
   },
   {
     q: 'Is my data secure?',
-    a: 'Yes. API keys are encrypted at rest, all traffic is TLS-encrypted, and Supabase row-level security ensures users only see data they are authorized to access.',
+    a: 'Yes. API keys are encrypted at rest, all traffic is TLS-encrypted, and row-level security ensures users only see data they are authorized to access.',
   },
   {
     q: 'Can I use my own API keys?',

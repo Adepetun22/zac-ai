@@ -47,6 +47,12 @@ class SupabaseService {
 
   /**
    * Authentication methods
+   *
+   * ⚠ DEPRECATED — all credential-bearing auth operations are now proxied
+   * through the backend (@/store/authStore) so the browser never sends
+   * email/password directly to Supabase. These wrappers are kept for
+   * backward-compatibility with any code that still calls them, but new code
+   * MUST go through the auth store.
    */
 
   // Resolve the public origin of the deployed app, falling back to the
@@ -75,7 +81,7 @@ class SupabaseService {
     removeSessionItem(AUTH_ERROR_KEY);
   }
 
-  // Sign up a new user
+  // Sign up a new user. @deprecated — use useAuthStore.getState().signUp() instead.
   async signUp(email, password, name) {
     // Supabase sends a confirmation email by default, but it needs a
     // redirect target to build a working link. Without emailRedirectTo the
@@ -104,6 +110,7 @@ class SupabaseService {
 
   // Send a password reset email. The redirect target is the reset page so the
   // recovery link lands the user where they can set a new password.
+  // @deprecated Use `useAuthStore.getState().requestPasswordReset()` instead.
   //
   // NOTE: do NOT put a `#` in here. Supabase appends `?code=<auth_code>` to
   // whatever `redirectTo` you give it; with a `#` present the `?code=...` is
@@ -123,7 +130,7 @@ class SupabaseService {
     return { error: null };
   }
 
-  // Sign in a user
+  // Sign in a user. @deprecated — use useAuthStore.getState().signIn() instead.
   async signIn(email, password) {
     const { data, error } = await this.client.auth.signInWithPassword({
       email,
@@ -134,7 +141,7 @@ class SupabaseService {
     return data;
   }
 
-  // Sign out the current user
+  // Sign out the current user. @deprecated — use useAuthStore.getState().signOut().
   async signOut() {
     const { error } = await this.client.auth.signOut();
     if (error) throw error;
@@ -145,7 +152,8 @@ class SupabaseService {
     return this.client.auth.getUser();
   }
 
-  // Update the current user's password (requires an active session)
+  // Update the current user's password. @deprecated — use useAuthStore.getState().updatePassword() instead.
+  // Requires an active session.
   async updatePassword(newPassword) {
     const { error } = await this.client.auth.updateUser({
       password: newPassword,
@@ -351,20 +359,104 @@ class SupabaseService {
   }
   /**
     * AI Models operations
+    *
+    * ⚠ DEPRECATED — the direct-Supabase methods below are kept for backward
+    * compatibility. New code MUST use the backend /api/models endpoints
+    * which encrypt API keys server-side before storing them.
+    *
+    * The backend endpoints (POST/GET/PUT/DELETE /api/models) handle:
+    *   - Encrypting api_key before storing in Supabase
+    *   - Decrypting api_key only when the server needs it for LLM calls
+    *   - Masking api_key in list responses
+    *
+    * Direct-Supabase methods (below) store/return plaintext keys and should
+    * not be used for new features.
     */
 
-  // Get all AI models for a user
+  // ── Backend-routed model operations (encrypts API keys) ──────
+
+  // Build the URL for the backend API.
+  getBackendUrl(path) {
+    const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+    return backendUrl ? `${backendUrl}${path}` : `/api${path}`
+  }
+
+  // Create a model via the backend (api_key is encrypted server-side).
+  async createAiModelBackend(model) {
+    const response = await fetch(this.getBackendUrl('/models'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(model),
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${response.status}`)
+    }
+    return response.json()
+  }
+
+  // Fetch models via the backend (api_key is masked in the response).
+  async getAiModelsBackend(userId) {
+    const response = await fetch(this.getBackendUrl(`/models?userId=${encodeURIComponent(userId)}`))
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${response.status}`)
+    }
+    const data = await response.json()
+    return data.aiModels || []
+  }
+
+  // Fetch a single model via the backend (returns decrypted api_key for editing).
+  async getAiModelBackend(id, userId) {
+    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`))
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${response.status}`)
+    }
+    const data = await response.json()
+    return data.aiModel
+  }
+
+  // Update a model via the backend (api_key is encrypted server-side if provided).
+  async updateAiModelBackend(id, updates) {
+    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${response.status}`)
+    }
+    return response.json()
+  }
+
+  // Delete a model via the backend.
+  async deleteAiModelBackend(id) {
+    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}`), {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${response.status}`)
+    }
+    return response.json()
+  }
+
+  // ── Deprecated direct-Supabase methods (plaintext keys) ───────
+
+  // Get all AI models for a user. @deprecated Use getAiModelsBackend() instead.
   async getAiModels(userId) {
     const { data, error } = await this.client
       .from('ai_models')
       .select('*')
       .eq('user_id', userId);
-    
+
     if (error) throw error;
     return data;
   }
 
-  // Create a new AI model
+  // Create a new AI model. @deprecated Use createAiModelBackend() instead.
   async createAiModel(model) {
     const { error } = await this.client
       .from('ai_models')
@@ -386,23 +478,23 @@ class SupabaseService {
     if (error) throw error;
   }
 
-  // Update an AI model
+  // Update an AI model. @deprecated Use updateAiModelBackend() instead.
   async updateAiModel(id, updates) {
     const { error } = await this.client
       .from('ai_models')
       .update(updates)
       .eq('id', id);
-    
+
     if (error) throw error;
   }
 
-  // Delete an AI model
+  // Delete an AI model. @deprecated Use deleteAiModelBackend() instead.
   async deleteAiModel(id) {
     const { error } = await this.client
       .from('ai_models')
       .delete()
       .eq('id', id);
-    
+
     if (error) throw error;
   }
 

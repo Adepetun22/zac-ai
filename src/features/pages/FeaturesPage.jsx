@@ -41,7 +41,7 @@ const FEATURES = [
   {
     icon: Shield,
     title: 'Enterprise-Ready Security',
-    description: 'Supabase auth, row-level security, and encrypted storage keep your data protected.',
+    description: 'Secure authentication, row-level security, and encrypted storage keep your data protected.',
     color: 'from-sky-500 to-blue-600',
     bullets: ['Row-level security policies', 'OAuth & magic link auth', 'Encrypted API key storage'],
   },

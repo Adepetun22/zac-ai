@@ -3,6 +3,48 @@ import { supabase } from '../config/supabase';
 import supabaseService from '../services/supabaseService';
 import useNotificationStore from './notificationStore';
 
+// ── Backend auth proxy helpers ─────────────────────────────────
+// Auth credentials (email/password) are sent to the backend, which uses the
+// Supabase service-role key to call the auth API. The browser never talks to
+// Supabase directly for auth, so the Network tab never reveals the Supabase
+// URL or anon key during sign-in / sign-up / password-reset flows.
+
+// Build the URL for the backend auth API.
+// When VITE_BACKEND_URL is set (production) we append the path directly.
+// When it's absent (local dev) the Vite proxy forwards /api/* → backend.
+const getAuthApiUrl = (path) => {
+  const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+  return backendUrl ? `${backendUrl}${path}` : `/api${path}`
+}
+
+// Lightweight wrapper — returns { ok, data } so callers can check status.
+async function authFetch(path, options = {}) {
+  const response = await fetch(getAuthApiUrl(path), {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+  })
+  const data = await response.json().catch(() => ({}))
+  return { ok: response.ok, data }
+}
+
+// Retrieve the current access token from the client-side session.
+async function getAccessToken() {
+  if (!supabase) return null
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token || null
+}
+
+// Restore the session on the client-side Supabase client so that data
+// subscriptions / realtime channels work as before.
+async function setClientSession(session) {
+  if (!supabase || !session) return
+  try {
+    await supabase.auth.setSession(session)
+  } catch (err) {
+    console.warn('Failed to restore client session:', err.message)
+  }
+}
+
 // Params Supabase puts on an auth-callback URL. They must be read BEFORE the
 // first `supabase.auth` call: the client strips `?code=` from the query string
 // with `history.replaceState` during its own initialize(), and on the failure
@@ -197,20 +239,27 @@ const useAuthStore = create((set, get) => ({
       return { error: null };
     }
     
-    const { error, data } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    
-    if (!error && data.session) {
-      const user = await loadProfileIntoUser(data.user);
-      set({ 
-        user, 
-        isAuthenticated: true 
-      });
+    const { ok, data } = await authFetch('/auth/signin', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })
+
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to sign in') }
     }
-    
-    return { error };
+
+    // Restore the session on the client-side Supabase client so that
+    // realtime subscriptions and data operations keep working.
+    if (data.session) {
+      await setClientSession(data.session)
+    }
+
+    if (data.user) {
+      const user = await loadProfileIntoUser(data.user)
+      set({ user, isAuthenticated: true })
+    }
+
+    return { error: null }
   },
   
   signUp: async (email, password, name) => {
@@ -223,32 +272,44 @@ const useAuthStore = create((set, get) => ({
       return { error: null };
     }
     
-    const { error, data } = await supabaseService.signUp(email, password, name);
-    if (error) return { error };
+    const { ok, data } = await authFetch('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    })
 
-    // Only authenticate immediately when Supabase hands back an active
-    // session. When email confirmation is required, `signUp` returns a user
-    // row but no session — logging in there would let the user bypass the
-    // confirmation link entirely, so the store stays unauthenticated and the
-    // signup page's "check your email" message is the real gate.
-    if (data?.user && data?.session) {
-      // Best-effort: load the profile the trigger just created
-      let user = { ...data.user, name: data.user.user_metadata?.name || name };
-      try {
-        const profile = await supabaseService.getProfile(data.user.id);
-        if (profile) {
-          user = { ...user, name: profile.name || user.name, email: profile.email || user.email };
-        }
-      } catch {
-        // Trigger may not have flushed yet; metadata name is sufficient
-      }
-      set({ user, isAuthenticated: true });
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to create account') }
     }
 
-    return { error: null };
+    // When email confirmation is enabled, signUp returns a user but no
+    // session — logging in there would bypass the confirmation gate.
+    if (data?.user && data?.session) {
+      await setClientSession(data.session)
+      let user = { ...data.user, name: data.user.user_metadata?.name || name }
+      try {
+        const profile = await supabaseService.getProfile(data.user.id)
+        if (profile) {
+          user = { ...user, name: profile.name || user.name, email: profile.email || user.email }
+        }
+      } catch { /* trigger may not have flushed yet */ }
+      set({ user, isAuthenticated: true })
+    }
+
+    return { error: null }
   },
   
   signOut: async () => {
+    // Also notify the backend so it can perform any server-side cleanup.
+    const accessToken = await getAccessToken()
+    if (accessToken) {
+      try {
+        await authFetch('/auth/signout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ access_token: accessToken }),
+        })
+      } catch { /* ignore — local sign-out still proceeds */ }
+    }
     if (supabase) {
       await supabase.auth.signOut();
     }
@@ -264,13 +325,17 @@ const useAuthStore = create((set, get) => ({
       console.warn('Supabase not configured, password reset unavailable');
       return { error: new Error('Password reset is not available right now') };
     }
-    
-    try {
-      await supabaseService.requestPasswordReset(email);
-      return { error: null };
-    } catch (err) {
-      return { error: err };
+
+    const { ok, data } = await authFetch('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to send reset email') }
     }
+
+    return { error: null };
   },
   
   // Set a new password from the recovery flow. Distinct from updatePassword,
@@ -281,45 +346,71 @@ const useAuthStore = create((set, get) => ({
     if (!supabase) {
       return { error: new Error('Password reset is not available right now') };
     }
-    
-    const { error } = await supabaseService.updatePassword(newPassword);
-    if (error) return { error };
-    
+
+    const accessToken = await getAccessToken()
+    if (!accessToken) {
+      return { error: new Error('No active recovery session') }
+    }
+
+    const { ok, data } = await authFetch('/auth/update-password', {
+      method: 'POST',
+      body: JSON.stringify({ password: newPassword, access_token: accessToken }),
+    })
+
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to reset password') }
+    }
+
+    // Clear the recovery session — it's single-purpose.
     await supabase.auth.signOut();
     set({ user: null, isAuthenticated: false });
-    
+
     return { error: null };
   },
   
   updateUser: async (updates) => {
     if (!supabase) {
       console.warn('Supabase not configured, updating mock user');
-      set(state => ({ 
-        user: { ...state.user, ...updates } 
+      set(state => ({
+        user: { ...state.user, ...updates }
       }));
       return { error: null };
     }
-    
-    const { error, data } = await supabase.auth.updateUser(updates);
-    
-    if (!error && data.user) {
+
+    const accessToken = await getAccessToken()
+    if (!accessToken) {
+      return { error: new Error('Not authenticated') }
+    }
+
+    const { ok, data } = await authFetch('/auth/user', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(updates),
+    })
+
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to update profile') }
+    }
+
+    // Sync the profiles table (name field etc.) — this is a data operation
+    // that still goes through the client-side Supabase client.
+    if (updates.data?.first_name || updates.data?.last_name) {
       try {
         const profileUpdates = {};
         if (updates.data?.first_name || updates.data?.last_name) {
           profileUpdates.name = `${updates.data.first_name || ''} ${updates.data.last_name || ''}`.trim();
         }
         if (Object.keys(profileUpdates).length > 0) {
-          await supabaseService.updateProfile(data.user.id, profileUpdates);
+          await supabaseService.updateProfile(get().user?.id, profileUpdates);
         }
-        const user = await loadProfileIntoUser(data.user);
+        const user = await loadProfileIntoUser(get().user);
         set({ user });
       } catch (err) {
         console.warn('Could not sync profile:', err.message);
-        set({ user: data.user });
       }
     }
-    
-    return { error };
+
+    return { error: null };
   },
 
   updatePassword: async (newPassword) => {
@@ -327,7 +418,22 @@ const useAuthStore = create((set, get) => ({
       console.warn('Supabase not configured, mock password update');
       return { error: null };
     }
-    return await supabaseService.updatePassword(newPassword);
+
+    const accessToken = await getAccessToken()
+    if (!accessToken) {
+      return { error: new Error('Not authenticated') }
+    }
+
+    const { ok, data } = await authFetch('/auth/update-password', {
+      method: 'POST',
+      body: JSON.stringify({ password: newPassword, access_token: accessToken }),
+    })
+
+    if (!ok || data.error) {
+      return { error: new Error(data.error || 'Failed to update password') }
+    }
+
+    return { error: null };
   }
 }));
 

@@ -53,9 +53,12 @@ class AIService {
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   }
 
-  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey = null, messages = [], tools = null) {
+  // Note: the 4th parameter is now `userId` (not `apiKey`). The server looks up
+  // and decrypts the user's encrypted API key from the database — the raw key
+  // never travels from the client to the backend.
+  async generateResponse(prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', userId = null, messages = [], tools = null) {
     try {
-      const result = await this.callBackendAI(prompt, modelId, type, apiKey, messages, tools);
+      const result = await this.callBackendAI(prompt, modelId, type, userId, messages, tools);
       if (result !== null && result !== undefined) {
         if (type === 'structured') {
           if (result.schema && typeof result.schema === 'object') return result.schema
@@ -87,7 +90,7 @@ class AIService {
         for (const fallbackModel of fallbackModels) {
           if (!isModelSpecificError && this.resolveProvider(fallbackModel) === this.resolveProvider(modelId)) continue
           try {
-            const result = await this.callBackendAI(prompt, fallbackModel, type, null, messages, tools)
+            const result = await this.callBackendAI(prompt, fallbackModel, type, userId, messages, tools)
             if (result !== null && result !== undefined) {
               if (type === 'image' && result.imageUrl) return result.imageUrl
               if (result.text) return result.text
@@ -227,11 +230,13 @@ class AIService {
     }
   }
 
-  async callBackendAI(prompt, modelId, type = 'text', apiKey = null, messages = [], tools = null) {
+  // The backend resolves the API key itself (decrypting from the DB or falling
+  // back to server-level env vars). The client only sends modelId + userId.
+  async callBackendAI(prompt, modelId, type = 'text', userId = null, messages = [], tools = null) {
     try {
       console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
       const body = { prompt, modelId, type }
-      if (apiKey) body.apiKey = apiKey
+      if (userId) body.userId = userId
       if (messages && messages.length > 0) body.messages = messages
       if (tools && tools.length > 0) body.tools = tools
       const response = await fetch(

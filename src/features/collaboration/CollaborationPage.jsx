@@ -1,6 +1,6 @@
 ﻿import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, Copy, Check, Link, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, ChevronRight, Copy, Check, Link, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet, BookOpen, Trash2, Search } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -23,6 +23,8 @@ import useDashboardStore from '../../store/dashboardStore'
 import { useNotification } from '../../components/useNotification'
 import AIService, { AIError, explainError } from '../../services/aiService'
 import { useAIStore } from '../../store/aiStore'
+import MarkdownMessage from '../../components/MarkdownMessage'
+import knowledgeService from '../../services/knowledgeService'
 
 // Built-in free models — kept for image model detection only; model list comes from aiStore
 const IMAGE_MODEL_IDS = ['huggingface/free-image']
@@ -63,7 +65,7 @@ function unpackToolResult(toolResult, modelId) {
   return null
 }
 
-async function processAIRequest(prompt, modelId, apiKey = null, messages = [], tools = null) {
+async function processAIRequest(prompt, modelId, userId = null, messages = [], tools = null) {
   try {
     const p = prompt.toLowerCase()
     const isImageModel = modelId.includes('FLUX') || modelId.includes('stable') || modelId.includes('flux') || modelId.includes('pollinations') || modelId.includes('free-image') || modelId.includes('huggingface')
@@ -95,7 +97,7 @@ async function processAIRequest(prompt, modelId, apiKey = null, messages = [], t
 
     // Spreadsheet / email / calendar → always use tool calling
     if ((isSpreadsheetPrompt || isEmailPrompt || isCalendarPrompt) && tools) {
-      const result = await AIService.generateResponse(prompt, modelId, 'text', apiKey, messages, tools)
+      const result = await AIService.generateResponse(prompt, modelId, 'text', userId, messages, tools)
       const unpacked = unpack(result)
       if (unpacked) return unpacked
       const text = typeof result === 'string' ? result : result?.text
@@ -104,14 +106,14 @@ async function processAIRequest(prompt, modelId, apiKey = null, messages = [], t
 
     // Chart prompts → structured JSON response
     if (isChartPrompt) {
-      const structured = await AIService.generateResponse(prompt, modelId, 'structured', apiKey, messages, tools)
+      const structured = await AIService.generateResponse(prompt, modelId, 'structured', userId, messages, tools)
       const unpacked = unpack(structured)
       if (unpacked) return unpacked
       if (typeof structured === 'string') return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: structured }
     }
 
     // General text response
-    const aiResponse = await AIService.generateResponse(prompt, modelId, 'text', apiKey, messages, tools)
+    const aiResponse = await AIService.generateResponse(prompt, modelId, 'text', userId, messages, tools)
     if (typeof aiResponse === 'string') return { type: 'text', title: `AI Response: ${prompt.slice(0, 40)}`, model: modelId, content: aiResponse }
     const unpacked = unpack(aiResponse)
     if (unpacked) return unpacked
@@ -448,7 +450,7 @@ function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOp
 }
 
 // ─── AI Chat Panel ────────────────────────────────────────────────────────────
-function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
+function ChatPanel({ onAddWidget, mobileOpen, onMobileClose, sessionId }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', text: 'Hi! Describe a chart or data view and I\'ll add it to the canvas. Try: "Show Q3 revenue" or "Usage breakdown". Note: Responses may be simulated if API keys are not configured.' }
   ])
@@ -457,9 +459,35 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
   const [selectedModelId, setSelectedModelId] = useState('openrouter/google/gemma-4-26b-a4b-it:free')
   const bottomRef = useRef(null)
   const { addNotification } = useNotification()
-
+  const { user } = useAuthStore()
   // All models come from aiStore (built-in free + user-registered)
   const { aiModels: allModels } = useAIStore()
+
+  // ── Knowledge Base (RAG) state ─────────────────────────────────
+  const [knowledgeDocs, setKnowledgeDocs] = useState([])
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false)
+  const [showKb, setShowKb] = useState(false)
+  const [kbTitle, setKbTitle] = useState('')
+  const [kbContent, setKbContent] = useState('')
+
+  // Load knowledge base documents when sessionId is available
+  useEffect(() => {
+    if (!sessionId) return
+    let active = true
+    const loadDocs = async () => {
+      setKnowledgeLoading(true)
+      try {
+        const docs = await knowledgeService.listDocuments(sessionId)
+        if (active) setKnowledgeDocs(docs || [])
+      } catch (err) {
+        console.warn('Could not load knowledge base docs:', err.message)
+      } finally {
+        if (active) setKnowledgeLoading(false)
+      }
+    }
+    loadDocs()
+    return () => { active = false }
+  }, [sessionId])
 
   // Check backend status on mount
   useEffect(() => {
@@ -496,9 +524,31 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.text }))
+
+      // ── RAG: search the knowledge base for relevant context ──────
+      let enrichedPrompt = text
+      if (sessionId && knowledgeDocs.length > 0) {
+        try {
+          const results = await knowledgeService.searchDocuments(sessionId, text, 5)
+          if (results && results.length > 0) {
+            const contextBlock = results
+              .map(r => `[${r.title}] ${r.chunk}`)
+              .join('\n\n')
+            enrichedPrompt = `Context from knowledge base:\n${contextBlock}\n\nUser question: ${text}`
+            setMessages(m => [...m, {
+              role: 'assistant',
+              text: `🔍 Found relevant context from ${results.length} knowledge base ${results.length === 1 ? 'document' : 'documents'}.`,
+              isContextNotice: true,
+            }])
+          }
+        } catch (kbErr) {
+          console.warn('Knowledge base search failed:', kbErr.message)
+        }
+      }
+
       // Tools available for this request
       const toolNames = ['create_spreadsheet', 'create_chart', 'send_email', 'create_calendar_event']
-      const schema = await processAIRequest(text, selectedModelId, selectedModel?.api_key || null, history, toolNames)
+      const schema = await processAIRequest(enrichedPrompt, selectedModelId, user?.id, history, toolNames)
 
       if (schema?.error) {
         const isCode = schema.errorKind === 'code'
@@ -552,6 +602,34 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
     }
   }
 
+  const handleAddDocument = async () => {
+    const title = kbTitle.trim()
+    const content = kbContent.trim()
+    if (!title || !content || !sessionId || !user?.id) return
+
+    try {
+      const doc = await knowledgeService.createDocument(sessionId, user.id, title, content)
+      setKnowledgeDocs(prev => [doc, ...prev])
+      setKbTitle('')
+      setKbContent('')
+      addNotification(`Added "${title}" to the knowledge base`, 'success')
+    } catch (err) {
+      console.warn('Could not add knowledge doc:', err.message)
+      addNotification('Could not add document to knowledge base', 'error')
+    }
+  }
+
+  const handleDeleteDocument = async (docId, title) => {
+    try {
+      await knowledgeService.deleteDocument(docId, user?.id)
+      setKnowledgeDocs(prev => prev.filter(d => d.id !== docId))
+      addNotification(`Removed "${title}" from the knowledge base`, 'success')
+    } catch (err) {
+      console.warn('Could not delete knowledge doc:', err.message)
+      addNotification('Could not remove document', 'error')
+    }
+  }
+
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--color-bg-surface)' }}>
       <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
@@ -580,19 +658,26 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-thin">
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[85%] px-3 py-2 rounded-xl text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'text-white rounded-br-sm'
-                  : 'rounded-bl-sm'
-              }`}
-              style={msg.role === 'user'
-                ? { backgroundColor: 'var(--color-brand-500)', color: '#fff' }
-                : { backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-secondary)' }
-              }
-            >
-              {msg.text}
-            </div>
+             <div
+               className={`max-w-[85%] px-3 py-2 rounded-xl text-sm leading-relaxed ${
+                 msg.role === 'user'
+                   ? 'text-white rounded-br-sm'
+                   : 'rounded-bl-sm'
+             }`}
+             style={msg.role === 'user'
+               ? { backgroundColor: 'var(--color-brand-500)', color: '#fff' }
+               : { backgroundColor: 'var(--color-bg-canvas)', color: 'var(--color-text-secondary)' }
+             }
+           >
+{msg.isContextNotice ? (
+              <span className="flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                <Search className="w-3 h-3" />
+                {msg.text}
+              </span>
+            ) : (
+              <MarkdownMessage isUser={msg.role === 'user'}>{msg.text}</MarkdownMessage>
+            )}
+          </div>
           </div>
         ))}
         {thinking && (
@@ -607,6 +692,83 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose }) {
           </div>
         )}
         <div ref={bottomRef} />
+      </div>
+
+      {/* ── Knowledge Base section ─────────────────── */}
+      <div className="border-t" style={{ borderColor: 'var(--color-border-subtle)' }}>
+        <button
+          onClick={() => setShowKb(v => !v)}
+          className="w-full px-4 py-2.5 flex items-center gap-2 text-left text-xs font-medium"
+          style={{
+            backgroundColor: showKb ? 'var(--color-bg-canvas)' : 'var(--color-bg-surface)',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          Knowledge Base ({knowledgeDocs.length})
+          {showKb ? <ChevronDown className="w-3 h-3 ml-auto" style={{ color: 'var(--color-text-muted)' }} /> : <ChevronRight className="w-3 h-3 ml-auto" style={{ color: 'var(--color-text-muted)' }} />}
+        </button>
+
+        {showKb && (
+          <div className="px-4 py-3 space-y-3" style={{ maxHeight: 240, overflowY: 'auto' }}>
+            {!sessionId && (
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Join a session to use the knowledge base.</p>
+            )}
+            {knowledgeDocs.length === 0 && sessionId && !knowledgeLoading && (
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>No documents yet. Add one below to give the AI context.</p>
+            )}
+            {knowledgeDocs.length > 0 && (
+              <div className="space-y-2">
+                {knowledgeDocs.map(doc => (
+                  <div key={doc.id} className="flex items-start gap-2 p-2 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)' }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{doc.title}</p>
+                      <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--color-text-muted)' }}>{doc.content.slice(0, 120)}{doc.content.length > 120 ? '…' : ''}</p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteDocument(doc.id, doc.title)}
+                      className="p-1 rounded hover:opacity-70 cursor-pointer shrink-0"
+                      style={{ color: 'var(--color-text-muted)' }}
+                      title="Delete document"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showKb && sessionId && (
+          <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--color-border-subtle)' }}>
+            <div className="space-y-2">
+              <input
+                value={kbTitle}
+                onChange={e => setKbTitle(e.target.value)}
+                placeholder="Document title"
+                className="w-full px-2 py-1.5 rounded border text-xs outline-none focus:ring-1 focus:ring-[var(--color-brand-500)]"
+                style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
+              />
+              <textarea
+                value={kbContent}
+                onChange={e => setKbContent(e.target.value)}
+                placeholder="Paste document content (the AI will search this for answers)..."
+                className="w-full px-2 py-1.5 rounded border text-xs outline-none focus:ring-1 focus:ring-[var(--color-brand-500)] resize-y"
+                style={{ backgroundColor: 'var(--color-bg-canvas)', borderColor: 'var(--color-border-subtle)', color: 'var(--color-text-primary)' }}
+                rows={3}
+              />
+              <button
+                onClick={handleAddDocument}
+                disabled={!kbTitle.trim() || !kbContent.trim() || !user?.id}
+                className="w-full py-1.5 rounded text-xs font-medium text-white transition-opacity disabled:opacity-40 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
+              >
+                Add to Knowledge Base
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--color-border-subtle)' }}>
@@ -1678,7 +1840,7 @@ export default function CollaborationPage() {
         transform transition-transform duration-300 ease-in-out
         ${chatOpen ? 'translate-x-0' : 'translate-x-full'}
       `} style={{ borderColor: 'var(--color-border-subtle)' }}>
-        <ChatPanel onAddWidget={addWidget} mobileOpen={chatOpen} onMobileClose={() => setChatOpen(false)} />
+        <ChatPanel onAddWidget={addWidget} mobileOpen={chatOpen} onMobileClose={() => setChatOpen(false)} sessionId={sessionId} />
       </div>
 
       {/* Backdrop for mobile chat */}

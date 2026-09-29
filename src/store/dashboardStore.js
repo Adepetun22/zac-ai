@@ -148,15 +148,24 @@ const useDashboardStore = create((set, get) => ({
     }
   },
 
-  // Fetch AI models - Updated to use AI service
+  // Fetch AI models — uses backend endpoint so API keys are encrypted at rest.
+  // The backend returns masked keys only; the raw key is never stored in
+  // client-side state or persisted to localStorage.
   fetchAiModels: async (userId) => {
     if (!userId) return;
     try {
       let aiModels = [];
+      // Prefer the backend endpoint (encrypted storage) but fall back to
+      // direct Supabase if the backend is unreachable.
       try {
-        aiModels = await supabaseService.getAiModels(userId);
-      } catch (supabaseError) {
-        console.warn('Error fetching AI models from Supabase:', supabaseError);
+        aiModels = await supabaseService.getAiModelsBackend(userId);
+      } catch (backendError) {
+        console.warn('Backend models endpoint unavailable, falling back to direct Supabase:', backendError.message);
+        try {
+          aiModels = await supabaseService.getAiModels(userId);
+        } catch (supabaseError) {
+          console.warn('Error fetching AI models from Supabase:', supabaseError);
+        }
       }
       set({ aiModels: aiModels || [] });
       useAIStore.getState().syncUserModels(aiModels || []);
@@ -164,18 +173,20 @@ const useDashboardStore = create((set, get) => ({
     } catch (error) {
       console.error('Error in fetchAiModels:', error);
       set({ aiModels: [], aiModelsError: error.message });
+      useAIStore.getState().syncUserModels([]);
       get().computeMetrics();
     }
   },
 
-  // Add a new AI model
+  // Add a new AI model — routes through backend so api_key is encrypted.
   addAiModel: async (model) => {
     set({ isLoading: true, error: null });
     try {
-      await supabaseService.createAiModel(model);
-      set((state) => ({ 
-        aiModels: [...state.aiModels, model],
-        isLoading: false 
+      const result = await supabaseService.createAiModelBackend(model);
+      const savedModel = result.aiModel || model;
+      set((state) => ({
+        aiModels: [...state.aiModels, savedModel],
+        isLoading: false
       }));
       useAIStore.getState().syncUserModels([...get().aiModels]);
       get().computeMetrics()
@@ -185,14 +196,15 @@ const useDashboardStore = create((set, get) => ({
     }
   },
 
-  // Update an AI model
+  // Update an AI model — routes through backend so api_key is re-encrypted.
   updateAiModel: async (id, updates) => {
     set({ isLoading: true, error: null });
     try {
-      await supabaseService.updateAiModel(id, updates);
+      const result = await supabaseService.updateAiModelBackend(id, updates);
+      const updatedModel = result.aiModel || updates;
       set((state) => ({
         aiModels: state.aiModels.map(model =>
-          model.id === id ? { ...model, ...updates } : model
+          model.id === id ? { ...model, ...updatedModel } : model
         ),
         isLoading: false
       }));
@@ -204,13 +216,13 @@ const useDashboardStore = create((set, get) => ({
     }
   },
 
-  // Delete an AI model
+  // Delete an AI model — routes through backend.
   deleteAiModel: async (id) => {
     set({ isLoading: true, error: null });
     try {
-      // Find model_id before removing
+      // Find the model's model_id before removing (needed for aiStore cleanup)
       const model = get().aiModels.find(m => m.id === id);
-      await supabaseService.deleteAiModel(id);
+      await supabaseService.deleteAiModelBackend(id);
       set((state) => ({
         aiModels: state.aiModels.filter(model => model.id !== id),
         isLoading: false
@@ -224,10 +236,10 @@ const useDashboardStore = create((set, get) => ({
   },
 
   // Generate response from AI model
-  generateAIResponse: async (prompt, modelId) => {
+  generateAIResponse: async (prompt, modelId, userId = null) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await AIService.generateResponse(prompt, modelId);
+      const response = await AIService.generateResponse(prompt, modelId, 'text', userId);
       const responseText = typeof response === 'string' ? response : JSON.stringify(response);
       useAIStore.getState().recordRequest(modelId, responseText);
       useAIStore.getState().recordConversation(modelId, prompt, responseText);

@@ -1,92 +1,30 @@
-import { useState, useEffect } from 'react';
-import supabaseService from '../services/supabaseService';
+import { useEffect } from 'react';
+import useAuthStore from '../store/authStore';
 
 /**
- * Custom hook for managing Supabase authentication state
+ * Lightweight auth hook that mirrors the previous Supabase-based API.
+ *
+ * All credential operations are now proxied through the backend via the auth
+ * store — this hook delegates to it so callers never hit the Supabase client
+ * directly for auth.
+ *
+ * @deprecated Prefer importing `useAuthStore` directly.
  */
 export const useSupabaseAuth = () => {
-  const [session, setSession] = useState(null);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { user, isAuthenticated, isLoading, signIn, signUp, signOut, initAuth } = useAuthStore();
 
   useEffect(() => {
-    // Get initial session
-    const initializeAuth = async () => {
-      try {
-        const { data: { session } } = await supabaseService.getCurrentUser();
-        setSession(session);
-        setUser(session?.user || null);
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeAuth();
-
-    // Set up auth state listener
-    const { data: { subscription } } = supabaseService.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user || null);
-        setLoading(false);
-      }
-    );
-
-    // Cleanup subscription on unmount
-    return () => {
-      subscription?.unsubscribe();
-    };
-  }, []);
-
-  const signUp = async (email, password) => {
-    try {
-      setLoading(true);
-      const data = await supabaseService.signUp(email, password);
-      return data;
-    } catch (error) {
-      console.error('Sign up error:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const signIn = async (email, password) => {
-    try {
-      setLoading(true);
-      const data = await supabaseService.signIn(email, password);
-      return data;
-    } catch (error) {
-      console.error('Sign in error:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const signOut = async () => {
-    try {
-      setLoading(true);
-      await supabaseService.signOut();
-      setSession(null);
-      setUser(null);
-    } catch (error) {
-      console.error('Sign out error:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Prime the auth store on mount (reads persisted session from localStorage).
+    initAuth();
+  }, [initAuth]);
 
   return {
-    session,
+    session: isAuthenticated ? { user } : null,
     user,
-    loading,
-    signUp,
-    signIn,
+    loading: isLoading,
+    signUp: (email, password, name) => signUp(email, password, name),
+    signIn: (email, password) => signIn(email, password),
     signOut,
-    isAuthenticated: !!user,
+    isAuthenticated,
   };
 };

@@ -21,6 +21,8 @@ export const useAIStore = create(
 
   // Sync user-registered models from dashboardStore into aiModels.
   // Keeps built-in free models intact; merges/replaces user models by model_id.
+  // API keys are NOT included — they stay server-side and are looked up by
+  // the backend via the model's model_id when the user sends a message.
   syncUserModels: (userModels) => {
     const active = (userModels || []).filter(m => m.status === 'active' && m.model_id);
     set(state => {
@@ -34,7 +36,7 @@ export const useAIStore = create(
           status: 'active',
           latency: m.latency || 0,
           cost: m.cost || 0,
-          api_key: m.api_key || null,
+          // api_key is intentionally excluded — never stored in localStorage.
           api_requests: m.api_requests || 0,
           tokens_processed: m.tokens_processed || 0,
           isBuiltIn: false,
