@@ -67,7 +67,11 @@ export function useWebSocket({
 
     if (type === 'cursor:move') {
       await channel.send({ type: 'broadcast', event: 'cursor', payload });
-    } else if (type === 'widget:move' || type === 'widget:add') {
+    } else if (type === 'widget:move') {
+      // Broadcast only — { self: false } in channel config prevents echo.
+      // The caller already updated local React state optimistically.
+      await channel.send({ type: 'broadcast', event: 'widget', payload: { ...payload, op: type } });
+    } else if (type === 'widget:add') {
       await channel.send({ type: 'broadcast', event: 'widget', payload: { ...payload, op: type } });
       callbacks.current.onWidgetSync?.(payload);
     } else if (type === 'peer:invite') {

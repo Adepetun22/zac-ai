@@ -27,24 +27,19 @@ export const useAIStore = create(
       const builtIns = state.aiModels.filter(m => m.isBuiltIn);
       const merged = [...builtIns];
       active.forEach(m => {
-        const entry = {
-          id: m.model_id,
-          name: `${m.name} ★`,
-          provider: m.provider,
-          status: 'active',
-          latency: m.latency || 0,
-          cost: m.cost || 0,
-          api_key: m.api_key || null,
-          api_requests: m.api_requests || 0,
-          tokens_processed: m.tokens_processed || 0,
-          isBuiltIn: false,
-        };
-        // Replace existing user model (preserves updated API keys) or add new
-        const existingIdx = merged.findIndex(b => b.id === m.model_id && !b.isBuiltIn);
-        if (existingIdx >= 0) {
-          merged[existingIdx] = entry;
-        } else {
-          merged.push(entry);
+        const entry = { {
+          merged.push({
+            id: m.model_id,
+            name: `${m.name} ★`,
+            provider: m.provider,
+            status: 'active',
+            latency: m.latency || 0,
+            cost: m.cost || 0,
+            api_key: m.api_key || null,
+            api_requests: m.api_requests || 0,
+            tokens_processed: m.tokens_processed || 0,
+            isBuiltIn: false,
+          });
         }
       });
       return { aiModels: merged };

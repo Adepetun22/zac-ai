@@ -332,7 +332,7 @@ const WIDGET_WIDTH = {
 }
 
 // ─── Draggable Widget ─────────────────────────────────────────────────────────
-function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOpen, onToggleComments, onDragStart }) {
+function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOpen, onToggleComments, onDragStart, onDragEnd }) {
   const dragOffset = useRef(null)
   const isDragging = useRef(false)
 
@@ -364,6 +364,7 @@ function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOp
       document.removeEventListener('mouseup', onPointerUp)
       document.removeEventListener('touchmove', onPointerMove)
       document.removeEventListener('touchend', onPointerUp)
+      onDragEnd?.(widget.id)
     }
     document.addEventListener('mousemove', onPointerMove)
     document.addEventListener('mouseup', onPointerUp)
@@ -835,6 +836,17 @@ export default function CollaborationPage() {
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
 
+  // ─── Drag throttling refs ─────────────────────────────────────────────
+  // During a drag, onPointerMove fires ~60-120×/sec. We update local React
+  // state synchronously on every frame (for buttery drag), but throttle the
+  // Supabase write + WebSocket broadcast so they only fire every ~50 ms.
+  // The pendingRef stores the latest position so we always send the most
+  // recent state when the throttle fires.
+  const dragPendingRef = useRef(null)        // { id, pos } | null
+  const dragLastSentRef = useRef(0)          // timestamp of last batched sync
+  const dragFrameRef = useRef(null)          // requestAnimationFrame id
+  const draggingWidgetRef = useRef(null)     // widget id currently being dragged locally
+
   // Sync the ref outside of render (mutating refs during render is an
   // anti-pattern that React 19 flags and can break concurrent mode).
   useEffect(() => {
@@ -995,10 +1007,15 @@ export default function CollaborationPage() {
               }]));
               break;
             case 'UPDATE':
+              // Echo suppression: if we are currently dragging this widget
+              // locally, skip the realtime UPDATE. Our local state is
+              // authoritative during drag; the DB echo (with rounded
+              // coordinates) would cause visible jitter.
+              if (widget.id === draggingWidgetRef.current) return;
               setWidgets(prev =>
-                prev.map(w => 
-                  w.id === widget.id 
-                    ? { ...w, x: widget.position_x, y: widget.position_y } 
+                prev.map(w =>
+                  w.id === widget.id
+                    ? { ...w, x: widget.position_x, y: widget.position_y }
                     : w
                 )
               );
@@ -1227,26 +1244,72 @@ export default function CollaborationPage() {
   }, [send, sessionId, saveLocalWidgets])
 
   const moveWidget = useCallback(async (id, pos) => {
+    // 1. Optimistically update local state on every micro-movement for
+    //    buttery-smooth drag. No network calls in this hot path.
+    const roundedPos = { x: Math.round(pos.x), y: Math.round(pos.y) }
     setWidgets(prev => {
-      const next = prev.map(w => w.id === id ? { ...w, ...pos } : w)
+      const next = prev.map(w => w.id === id ? { ...w, ...roundedPos } : w)
       saveLocalWidgets(next)
       return next
     })
-    
-    // Update in Supabase if available
-    if (supabase) {
-      try {
-        await supabase
-          .from('dashboard_widgets')
-          .update({ position_x: Math.round(pos.x), position_y: Math.round(pos.y) })
-          .eq('id', id);
-      } catch (error) {
-        console.warn('Could not update widget position in Supabase:', error.message);
+
+    // 2. Throttle the Supabase write + WebSocket broadcast to ~50 ms.
+    //    Store the latest position and flush on the next animation frame
+    //    if enough time has elapsed.
+    dragPendingRef.current = { id, pos: roundedPos }
+
+    const now = Date.now()
+    const elapsed = now - dragLastSentRef.current
+
+    if (elapsed > 50) {
+      dragLastSentRef.current = now
+
+      const pending = dragPendingRef.current
+      if (pending) {
+        dragPendingRef.current = null
+        const { id: pendingId, pos: pendingPos } = pending
+
+        if (supabase) {
+          try {
+            supabase
+              .from('dashboard_widgets')
+              .update({ position_x: pendingPos.x, position_y: pendingPos.y })
+              .eq('id', pendingId)
+          } catch (error) {
+            console.warn('Could not update widget position in Supabase:', error.message)
+          }
+        }
+
+        send('widget:move', { id: pendingId, ...pendingPos })
+      }
+    } else {
+      if (!dragFrameRef.current) {
+        dragFrameRef.current = requestAnimationFrame(() => {
+          dragFrameRef.current = null
+          const pending = dragPendingRef.current
+          if (!pending) return
+
+          dragPendingRef.current = null
+          dragLastSentRef.current = Date.now()
+
+          const { id: pendingId, pos: pendingPos } = pending
+
+          if (supabase) {
+            try {
+              supabase
+                .from('dashboard_widgets')
+                .update({ position_x: pendingPos.x, position_y: pendingPos.y })
+                .eq('id', pendingId)
+            } catch (error) {
+              console.warn('Could not update widget position in Supabase:', error.message)
+            }
+          }
+
+          send('widget:move', { id: pendingId, ...pendingPos })
+        })
       }
     }
-    
-    send('widget:move', { id, ...pos })
-  }, [send, saveLocalWidgets])
+  }, [supabase, send, saveLocalWidgets])
 
   const removeWidget = useCallback(async (id) => {
     // Comments cascade at the database level; drop the local copy and close
@@ -1300,7 +1363,44 @@ export default function CollaborationPage() {
       if (prev === widgetId) setCommentAnchor(null)
       return prev === widgetId ? null : prev
     })
+    // Track which widget is being dragged locally so the Supabase Realtime
+    // UPDATE handler can suppress echo updates for it.
+    draggingWidgetRef.current = widgetId
   }, [])
+
+  const endDrag = useCallback((widgetId) => {
+    // Clear the "currently dragging" flag so the Supabase Realtime UPDATE
+    // handler will once again accept remote updates for this widget.
+    draggingWidgetRef.current = null
+
+    // Flush any pending drag update immediately (no more micro-movements
+    // coming, so send the final position right away).
+    const pending = dragPendingRef.current
+    if (pending) {
+      dragPendingRef.current = null
+      dragLastSentRef.current = Date.now()
+      const { id: pendingId, pos: pendingPos } = pending
+
+      if (supabase) {
+        try {
+          supabase
+            .from('dashboard_widgets')
+            .update({ position_x: pendingPos.x, position_y: pendingPos.y })
+            .eq('id', pendingId)
+        } catch (error) {
+          console.warn('Could not flush widget position in Supabase:', error.message)
+        }
+      }
+
+      send('widget:move', { id: pendingId, ...pendingPos })
+    }
+
+    // Cancel any pending animation frame.
+    if (dragFrameRef.current) {
+      cancelAnimationFrame(dragFrameRef.current)
+      dragFrameRef.current = null
+    }
+  }, [supabase, send])
 
   const addComment = useCallback(async (widgetId, { parentId, content }) => {
     if (!supabase || !sessionId || !user) return
@@ -1552,6 +1652,7 @@ export default function CollaborationPage() {
             commentsOpen={commentsOpenFor === w.id}
             onToggleComments={toggleComments}
             onDragStart={closeCommentsForDrag}
+            onDragEnd={endDrag}
           />
         ))}
       </div>
