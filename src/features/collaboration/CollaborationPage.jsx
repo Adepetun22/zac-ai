@@ -1008,6 +1008,7 @@ export default function CollaborationPage() {
   const dragLastSentRef = useRef(0)          // timestamp of last batched sync
   const dragFrameRef = useRef(null)          // requestAnimationFrame id
   const draggingWidgetRef = useRef(null)     // widget id currently being dragged locally
+  const cursorThrottleRef = useRef(0)        // last cursor broadcast timestamp (throttling)
 
   // Sync the ref outside of render (mutating refs during render is an
   // anti-pattern that React 19 flags and can break concurrent mode).
@@ -1345,6 +1346,9 @@ export default function CollaborationPage() {
   useEffect(() => {
     const handler = (e) => {
       if (sessionId) {
+        const now = Date.now();
+        if (now - cursorThrottleRef.current < 50) return;
+        cursorThrottleRef.current = now;
         send('cursor:move', {
           peerId: currentUserRef.current.id,
           name: currentUserRef.current.name,

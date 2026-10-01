@@ -63,7 +63,17 @@ export function useWebSocket({
 
   const send = useCallback(async (type, payload) => {
     const channel = channelRef.current;
-    if (!channel || channel.state !== 'SUBSCRIBED') return;
+    if (!channel) return;
+
+    // channel.state uses Phoenix CHANNEL_STATES (lowercase 'joined', 'joining', etc.)
+    // NOT the uppercase 'SUBSCRIBED' from REALTIME_SUBSCRIBE_STATES. The old
+    // check `!== 'SUBSCRIBED'` always returned early, silently dropping every
+    // broadcast — including cursor:move.
+    if (channel.state !== 'joined') {
+      // Diagnostic: uncomment to debug
+      // console.warn(`[useWebSocket] send() blocked — channel.state=${channel.state} (expected 'joined')`)
+      return;
+    }
 
     if (type === 'cursor:move') {
       await channel.send({ type: 'broadcast', event: 'cursor', payload });
