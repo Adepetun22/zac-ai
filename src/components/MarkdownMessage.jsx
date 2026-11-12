@@ -1,4 +1,3 @@
-import React from 'react'
 import ReactMarkdown from 'react-markdown'
 
 /**
@@ -16,26 +15,26 @@ export default function MarkdownMessage({ children, isUser = false }) {
     <ReactMarkdown
       components={{
         // --- Headings ---
-        h1: ({ node, ...props }) => (
+        h1: ({ node: _node, ...props }) => (
           <h1 className="text-sm font-semibold mt-2 mb-1" style={{ color: 'var(--color-text-primary)' }} {...props} />
         ),
-        h2: ({ node, ...props }) => (
+        h2: ({ node: _node, ...props }) => (
           <h2 className="text-sm font-semibold mt-2 mb-1" style={{ color: 'var(--color-text-primary)' }} {...props} />
         ),
-        h3: ({ node, ...props }) => (
+        h3: ({ node: _node, ...props }) => (
           <h3 className="text-xs font-semibold mt-2 mb-1" style={{ color: 'var(--color-text-primary)' }} {...props} />
         ),
-        h4: ({ node, ...props }) => (
+        h4: ({ node: _node, ...props }) => (
           <h4 className="text-xs font-semibold mt-2 mb-1" style={{ color: 'var(--color-text-primary)' }} {...props} />
         ),
 
         // --- Paragraphs ---
-        p: ({ node, ...props }) => (
+        p: ({ node: _node, ...props }) => (
           <p className="mb-2 last:mb-0" style={{ color: isUser ? '#fff' : 'inherit' }} {...props} />
         ),
 
         // --- Inline code ---
-        code: ({ node, inline, ...props }) => {
+        code: ({ node: _node, inline, ...props }) => {
           if (inline) {
             return (
               <code
@@ -63,18 +62,18 @@ export default function MarkdownMessage({ children, isUser = false }) {
         },
 
         // --- Lists ---
-        ul: ({ node, ...props }) => (
+        ul: ({ node: _node, ...props }) => (
           <ul className="list-disc list-inside mb-2 pl-0 space-y-0.5" {...props} />
         ),
-        ol: ({ node, ...props }) => (
+        ol: ({ node: _node, ...props }) => (
           <ol className="list-decimal list-inside mb-2 pl-0 space-y-0.5" {...props} />
         ),
-        li: ({ node, ...props }) => (
+        li: ({ node: _node, ...props }) => (
           <li style={{ color: isUser ? '#fff' : 'var(--color-text-secondary)' }} {...props} />
         ),
 
         // --- Blockquote ---
-        blockquote: ({ node, ...props }) => (
+        blockquote: ({ node: _node, ...props }) => (
           <blockquote
             className="border-l-2 pl-2 py-1 italic text-xs my-2 rounded"
             style={{
@@ -86,12 +85,12 @@ export default function MarkdownMessage({ children, isUser = false }) {
         ),
 
         // --- Tables ---
-        table: ({ node, ...props }) => (
+        table: ({ node: _node, ...props }) => (
           <div className="overflow-x-auto my-2">
             <table className="border-collapse text-xs" {...props} />
           </div>
         ),
-        th: ({ node, ...props }) => (
+        th: ({ node: _node, ...props }) => (
           <th
             className="px-2 py-1 text-left font-semibold border-b whitespace-nowrap"
             style={{
@@ -101,7 +100,7 @@ export default function MarkdownMessage({ children, isUser = false }) {
             {...props}
           />
         ),
-        td: ({ node, ...props }) => (
+        td: ({ node: _node, ...props }) => (
           <td
             className="px-2 py-1 border-b whitespace-nowrap"
             style={{
@@ -113,10 +112,10 @@ export default function MarkdownMessage({ children, isUser = false }) {
         ),
 
         // --- Em/Del ---
-        em: ({ node, ...props }) => (
+        em: ({ node: _node, ...props }) => (
           <em style={{ color: isUser ? '#fff' : 'inherit' }} {...props} />
         ),
-        strong: ({ node, ...props }) => (
+        strong: ({ node: _node, ...props }) => (
           <strong style={{ color: isUser ? '#fff' : 'var(--color-text-primary)' }} {...props} />
         ),
       }}

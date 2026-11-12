@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import MetricCard from '../../components/MetricCard';
 import ActivityChart from '../../components/ActivityChart';
@@ -129,7 +129,7 @@ export default function DashboardPage() {
   });
 
   const dismissOnboarding = () => {
-    try { localStorage.setItem('zac-onboarding-seen', 'true'); } catch {}
+    try { localStorage.setItem('zac-onboarding-seen', 'true'); } catch { /* ignore */ }
     setShowOnboarding(false);
   };
   const { 
@@ -138,7 +138,6 @@ export default function DashboardPage() {
     fetchDashboardData,
     fetchAnalytics,
     transformAnalyticsToActivityChart,
-    transformAnalyticsToRecentActivity,
     transformModelsToUsageChart,
   } = useDashboardStore();
 
@@ -155,7 +154,7 @@ export default function DashboardPage() {
     }
   }, [user?.id, fetchDashboardData]);
 
-  const handleRangeChange = useCallback((range) => {
+  const handleRangeChange = (range) => {
     setActivityRange(range);
     if (!user?.id) return;
     const today = new Date();
@@ -164,7 +163,7 @@ export default function DashboardPage() {
     else if (range === '30d') start.setDate(today.getDate() - 30);
     else start.setDate(today.getDate() - 1);
     fetchAnalytics(user.id, start, today);
-  }, [user?.id, fetchAnalytics]);
+  };
 
   const activityChartData = transformAnalyticsToActivityChart(analytics)
   const usageChartData = transformModelsToUsageChart(aiModels)

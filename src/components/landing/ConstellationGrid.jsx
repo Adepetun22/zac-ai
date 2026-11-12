@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import useThemeStore from '../../store/themeStore';
 
 function createNode(x, y, spacing, i, j) {
@@ -17,13 +17,8 @@ function createNode(x, y, spacing, i, j) {
 
 export default function ConstellationGrid() {
   const canvasRef = useRef(null);
-  const theme = useThemeStore((s) => s.theme);
   const resolvedTheme = useThemeStore((s) => s.resolveTheme(s.theme));
-  const [isDarkMode, setIsDarkMode] = useState(resolvedTheme === 'dark');
-
-  useEffect(() => {
-    setIsDarkMode(resolvedTheme === 'dark');
-  }, [resolvedTheme]);
+  const isDarkMode = resolvedTheme === 'dark';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -148,9 +143,6 @@ export default function ConstellationGrid() {
 
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
-        // Only check spatially nearby nodes — skip if both are far from mouse
-        const nNearMouse = Math.abs(mouse.x - n.x) < MAX_CONN_DIST + 20 ||
-                           Math.abs(mouse.y - n.y) < MAX_CONN_DIST + 20;
 
         for (let j = i + 1; j < nodes.length; j++) {
           const n2 = nodes[j];

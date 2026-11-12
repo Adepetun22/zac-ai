@@ -1,6 +1,7 @@
 ﻿import { create } from 'zustand';
 import { supabase } from '../config/supabase';
 import supabaseService from '../services/supabaseService';
+import { backendPath } from '../services/apiClient';
 import useNotificationStore from './notificationStore';
 
 // ── Backend auth proxy helpers ─────────────────────────────────
@@ -10,12 +11,9 @@ import useNotificationStore from './notificationStore';
 // URL or anon key during sign-in / sign-up / password-reset flows.
 
 // Build the URL for the backend auth API.
-// When VITE_BACKEND_URL is set (production) we append the path directly.
-// When it's absent (local dev) the Vite proxy forwards /api/* → backend.
-const getAuthApiUrl = (path) => {
-  const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
-  return backendUrl ? `${backendUrl}${path}` : `/api${path}`
-}
+// VITE_BACKEND_URL may be either the origin or the origin + /api; normalize it
+// so the final path always has exactly one /api segment.
+const getAuthApiUrl = (path) => backendPath(path);
 
 // Lightweight wrapper — returns { ok, data } so callers can check status.
 async function authFetch(path, options = {}) {

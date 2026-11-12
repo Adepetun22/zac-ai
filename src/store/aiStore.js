@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// Keep the persisted store bounded: localStorage is synchronous and shared by
+// every tab, so an unbounded conversation history eventually stalls the UI.
+const MAX_MESSAGES_PER_MODEL = 60;
+const MAX_MESSAGE_CHARS = 8_000;
+const clipMessage = (text) => String(text ?? '').slice(0, MAX_MESSAGE_CHARS);
+
 // Built-in free models always available in Collaboration
 export const FREE_MODELS = [
   { id: 'openrouter/google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B (Free)', provider: 'OpenRouter', status: 'active', latency: 600, cost: 0, api_requests: 0, tokens_processed: 0, isBuiltIn: true },
@@ -75,23 +81,35 @@ export const useAIStore = create(
 
   // Append a user+assistant message pair to conversations
   recordConversation: (modelId, userText, assistantText) => {
-    set(state => ({
-      conversations: {
-        ...state.conversations,
-        [modelId]: [
-          ...(state.conversations[modelId] || []),
-          { role: 'user', content: userText },
-          { role: 'assistant', content: assistantText },
-        ],
-      },
-    }));
+    set(state => {
+      const history = state.conversations[modelId] || [];
+      const next = [
+        ...history,
+        { role: 'user', content: clipMessage(userText) },
+        { role: 'assistant', content: clipMessage(assistantText) },
+      ].slice(-MAX_MESSAGES_PER_MODEL);
+
+      return {
+        conversations: {
+          ...state.conversations,
+          [modelId]: next,
+        },
+      };
+    });
   },
 }),
   {
     name: 'zac-ai-store',
     partialize: (state) => ({
       aiModels: state.aiModels,
-      conversations: state.conversations,
+      conversations: Object.fromEntries(
+        Object.entries(state.conversations)
+          .slice(-20)
+          .map(([modelId, messages]) => [
+            modelId,
+            messages.slice(-MAX_MESSAGES_PER_MODEL),
+          ]),
+      ),
     }),
     onRehydrateStorage: () => (state) => {
       if (!state) return;

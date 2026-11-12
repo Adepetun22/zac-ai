@@ -1,13 +1,19 @@
 services:
+  # Single-instance baseline. To scale horizontally, provision Redis, set
+  # REDIS_URL, and increase the instance count in the Render dashboard. The
+  # shared Redis limiter keeps rate limits and AI concurrency global.
   - type: web
     name: zac-ai-backend
     env: node
     plan: free
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: AI_PROXY_PORT
         value: 8787
+      - key: REDIS_URL
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY

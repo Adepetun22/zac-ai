@@ -3,6 +3,8 @@
 //   - 'provider' — upstream AI provider returned an error (4xx/5xx/network). May be transient; fallbacks are appropriate.
 //   - 'code'     — the app itself is misconfigured (missing server API key, bad model id, internal bug). Fallbacks won't help.
 // Both carry `code` (string machine-readable), `provider`, `status`, `detail`, `retriable`.
+import { authFetch } from './apiClient';
+
 export class AIError extends Error {
   constructor(message, { kind, code, provider, modelId, status, detail, retriable }) {
     super(message)
@@ -135,10 +137,7 @@ class AIService {
 
   async callBackendImage(prompt, _modelId) {
     try {
-      const url = this.backendUrl
-        ? `${this.backendUrl}/image?prompt=${encodeURIComponent(prompt)}`
-        : `/image?prompt=${encodeURIComponent(prompt)}`
-      const response = await fetch(url)
+      const response = await authFetch(`/image?prompt=${encodeURIComponent(prompt)}`)
       if (!response.ok) {
         const text = await response.text()
         console.error('[ERROR] Backend image API error:', response.status, text)
@@ -234,21 +233,16 @@ class AIService {
   // back to server-level env vars). The client only sends modelId + userId.
   async callBackendAI(prompt, modelId, type = 'text', userId = null, messages = [], tools = null) {
     try {
-      console.log('[DEBUG] Sending request to backend with modelId:', modelId, 'and prompt:', prompt.substring(0, 50) + '...');
       const body = { prompt, modelId, type }
       if (userId) body.userId = userId
       if (messages && messages.length > 0) body.messages = messages
       if (tools && tools.length > 0) body.tools = tools
-      const response = await fetch(
-        this.backendUrl ? `${this.backendUrl}/ai` : '/ai',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }
-      );
+      const response = await authFetch('/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-      console.log('[DEBUG] Backend response status:', response.status);
       let data = null
       try { data = await response.json() } catch { /* non-JSON */ }
 
@@ -271,9 +265,7 @@ class AIService {
         })
       }
 
-      console.log('[DEBUG] Backend response data:', data);
-
-      if (type === 'text' && data.text && typeof data.text === 'string') {
+      if (type === 'text' && data && data.text && typeof data.text === 'string') {
         const trimmed = data.text.trim()
         if (trimmed.startsWith('{')) {
           try {
@@ -305,8 +297,8 @@ class AIService {
         // The backend is unreachable. This is a CODE error (our deployment is broken),
         // not a provider error — surfacing it as such stops callers from hammering
         // OpenRouter etc. with no chance of success.
-        console.warn('[WARN] Backend AI proxy is unavailable at', this.backendUrl, '- network error.');
-        throw new AIError(`Cannot reach AI backend at ${this.backendUrl || '/ai'}`, {
+        console.warn('[WARN] Backend AI proxy is unavailable at', this.backendUrl || '/api/ai', '- network error.');
+        throw new AIError(`Cannot reach AI backend at ${this.backendUrl || '/api/ai'}`, {
           kind: 'code',
           code: 'NETWORK',
           provider: null,
@@ -316,7 +308,7 @@ class AIService {
           retriable: true,
         })
       }
-      console.warn('Backend AI call failed:', error.message, error.stack);
+      console.warn('Backend AI call failed:', error.message);
       throw new AIError(error.message || 'Unknown backend error', {
         kind: 'code',
         code: 'INTERNAL_ERROR',

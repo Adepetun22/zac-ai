@@ -625,7 +625,7 @@ export default function LandingPage() {
                   { icon: Zap, title: 'Instant visualizations', desc: 'Generate charts and tables from prompts in under two seconds.' },
                   { icon: Shield, title: 'Secure by default', desc: 'Enterprise-grade auth, row-level security, and encrypted storage.' },
                   { icon: Globe, title: 'Any device, any browser', desc: 'Responsive design that works on desktop, tablet, and mobile.' },
-                ].map((adv, idx) => (
+                ].map((adv) => (
                   <div
                     key={adv.title}
                     className="flex gap-4"

@@ -1,29 +1,28 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { LiveblocksProvider } from '@liveblocks/react';
+import { lazy, Suspense } from 'react';
 
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import DashboardPage from './features/dashboard/DashboardPage';
-import AIModelsPage from './features/ai-models/AIModelsPage';
-import AnalyticsPage from './features/analytics/AnalyticsPage';
-import CollaborationPage from './features/collaboration/CollaborationPage';
-import SettingsPage from './features/settings/SettingsPage';
-import LoginPage from './features/auth/LoginPage';
-import SignupPage from './features/auth/SignupPage';
-import ForgotPasswordPage from './features/auth/ForgotPasswordPage';
-import ResetPasswordPage from './features/auth/ResetPasswordPage';
-import LandingPage from './features/landing/LandingPage';
-import FeaturesPage from './features/pages/FeaturesPage';
-import HowItWorksPage from './features/pages/HowItWorksPage';
-import AdvantagesPage from './features/pages/AdvantagesPage';
 import useAuthStore from './store/authStore';
 import useThemeStore from './store/themeStore';
-import { liveblocksClient, liveblocksAuthEndpoint } from './config/liveblocks';
-import { resolveUsers, resolveRooms } from './liveblocks.config';
-import { useLiveblocks } from './hooks/useLiveblocks';
+import useCollaborationStore from './store/collaborationStore';
 import NotificationProvider from './components/Notification';
-import useNotificationStore from './store/notificationStore';
+import { backendPath } from './services/apiClient';
+
+const LandingPage = lazy(() => import('./features/landing/LandingPage'));
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
+const AIModelsPage = lazy(() => import('./features/ai-models/AIModelsPage'));
+const AnalyticsPage = lazy(() => import('./features/analytics/AnalyticsPage'));
+const CollaborationPage = lazy(() => import('./features/collaboration/CollaborationPage'));
+const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
+const LoginPage = lazy(() => import('./features/auth/LoginPage'));
+const SignupPage = lazy(() => import('./features/auth/SignupPage'));
+const ForgotPasswordPage = lazy(() => import('./features/auth/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('./features/auth/ResetPasswordPage'));
+const FeaturesPage = lazy(() => import('./features/pages/FeaturesPage'));
+const HowItWorksPage = lazy(() => import('./features/pages/HowItWorksPage'));
+const AdvantagesPage = lazy(() => import('./features/pages/AdvantagesPage'));
 
 // Scroll to top on route change
 const ScrollToTop = () => {
@@ -31,6 +30,12 @@ const ScrollToTop = () => {
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
   return null;
 };
+
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-[60vh]">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500" />
+  </div>
+);
 
 // ProtectedRoute component
 const ProtectedRoute = ({ children, isLoading, isAuthenticated }) => {
@@ -141,9 +146,9 @@ const AuthenticatedLayout = ({ collaborationStatus, sidebarCollapsed, setSidebar
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const { user, isAuthenticated, isLoading, initAuth } = useAuthStore();
-  const { addUserNotification } = useNotificationStore();
+  const { isAuthenticated, isLoading, initAuth } = useAuthStore();
   const { initTheme } = useThemeStore();
+  const { peerList } = useCollaborationStore();
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
 
@@ -152,7 +157,7 @@ function App() {
 
     const ping = async () => {
       try {
-        await fetch(`${backendUrl}/health`, { mode: 'no-cors' });
+        await fetch(backendPath('/health'), { mode: 'no-cors' });
       } catch {
         // ignore ping failures
       }
@@ -168,26 +173,9 @@ function App() {
     initTheme();
   }, [initTheme]);
 
-  // Use Liveblocks for collaboration status - use a default room name that's generic
-  const {
-    others,
-    otherUserCount, // Get otherUserCount directly from the hook
-    isLiveblocksEnabled,
-  } = useLiveblocks(`dashboard-app-${user?.id || 'anonymous'}`, user); // Per-user room to avoid global stranger notifications
-
-  // Get collaboration status for UI indicators
-  const collaborationStatus = {
-    isConnected: isLiveblocksEnabled,
-    userCount: others.length + (isLiveblocksEnabled ? 1 : 0), // Total users (others + current)
-    otherUserCount: otherUserCount, // Count of other users (excluding current user)
-  };
-
-  // Track previous others to detect joins/leaves
-  const prevOthersRef = useRef([]);
-  
+  // Initialize authentication. initAuth is async, so invoke it inside the
+  // effect and capture its cleanup; never return the Promise directly.
   useEffect(() => {
-    // Initialize authentication. initAuth is async, so invoke it inside the
-    // effect and capture its cleanup; never return the Promise directly.
     let cleanup;
     initAuth().then((fn) => {
       cleanup = fn;
@@ -195,37 +183,17 @@ function App() {
     return () => cleanup?.();
   }, [initAuth]);
 
-  // Handle user join/leave notifications
-  useEffect(() => {
-    const currentOthers = others.map(o => o.presence?.name || `User ${o.connectionId}`);
-    const prevOthers = prevOthersRef.current;
+  const collaborationStatus = {
+    isConnected: peerList.length > 0,
+    userCount: peerList.length + 1,
+    otherUserCount: peerList.length,
+  };
 
-    // Find new users who joined
-    currentOthers.forEach(current => {
-      if (!prevOthers.includes(current)) {
-        // Only add notification if there are actually other users (not just the current user)
-        if (others.length > 0) {
-          addUserNotification(current, 'joined');
-        }
-      }
-    });
-
-    // Find users who left
-    prevOthers.forEach(prev => {
-      if (!currentOthers.includes(prev)) {
-        addUserNotification(prev, 'left');
-      }
-    });
-
-    // Update ref with current others
-    prevOthersRef.current = currentOthers;
-  }, [others]); // Remove addUserNotification from dependencies to prevent continuous re-execution
-
-  // Conditionally render LiveblocksProvider based on whether client is available
   const innerContent = (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ScrollToTop />
-      <Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
         <Route
           path="/login"
           element={
@@ -318,34 +286,21 @@ function App() {
                 collaborationStatus={collaborationStatus}
                 sidebarCollapsed={sidebarCollapsed}
                 setSidebarCollapsed={setSidebarCollapsed}
-                connectedUsers={others}
+                connectedUsers={peerList}
               />
             </ProtectedRoute>
           }
         />
       </Routes>
+      </Suspense>
     </Router>
   );
 
-  if (liveblocksClient && liveblocksAuthEndpoint) {
-    return (
-      <LiveblocksProvider
-        authEndpoint={liveblocksAuthEndpoint}
-        resolveUsers={resolveUsers}
-        resolveRooms={resolveRooms}
-      >
-        <NotificationProvider>
-          {innerContent}
-        </NotificationProvider>
-      </LiveblocksProvider>
-    );
-  } else {
-    return (
-      <NotificationProvider>
-        {innerContent}
-      </NotificationProvider>
-    );
-  }
+  return (
+    <NotificationProvider>
+      {innerContent}
+    </NotificationProvider>
+  );
 }
 
 export default App;

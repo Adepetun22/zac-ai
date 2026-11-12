@@ -6,11 +6,20 @@ import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import { Liveblocks } from '@liveblocks/node'
 import nodemailer from 'nodemailer'
+import {
+  createConcurrencyLimiter,
+  createRateLimiter,
+  fetchAllowedImage,
+} from './security.js'
+import { shutdownRedis } from './redis.js'
 
 dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || process.env.AI_PROXY_PORT || 8787
+
+app.disable('x-powered-by')
+app.set('trust proxy', 1)
 
 const allowedOrigins = [
   'https://zac-ai.netlify.app',
@@ -19,14 +28,10 @@ const allowedOrigins = [
   'http://localhost:3000'
 ]
 app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)), credentials: true }))
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ limit: '10mb', extended: true }))
+app.use(express.json({ limit: '2mb' }))
+app.use(express.urlencoded({ limit: '2mb', extended: true }))
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
-const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null
 
 // ── Supabase admin client ──────────────────────────────────────
 // Uses the SERVICE_ROLE_KEY (secret) so auth credentials never pass through the
@@ -46,6 +51,90 @@ const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
 // Origin of the deployed frontend — used to build redirect URLs for email
 // confirmations and password-reset links.
 const frontendUrl = process.env.FRONTEND_URL || 'https://zac-ai.netlify.app'
+
+// ── Rate limits ─────────────────────────────────────────────
+// In-memory limits protect a single instance. When the service is scaled
+// horizontally, move these to a shared Redis store.
+const authLimiter = createRateLimiter({ name: 'auth', windowMs: 15 * 60 * 1000, max: 10 })
+const aiLimiter = createRateLimiter({
+  name: 'ai',
+  windowMs: 60 * 1000,
+  max: Number(process.env.AI_REQUESTS_PER_MINUTE) || 20,
+  keyGenerator: (req) => req.user?.id || req.ip,
+})
+const modelLimiter = createRateLimiter({ name: 'models', windowMs: 60 * 1000, max: 60 })
+const knowledgeLimiter = createRateLimiter({ name: 'knowledge', windowMs: 60 * 1000, max: 30 })
+const proxyLimiter = createRateLimiter({ name: 'proxy', windowMs: 60 * 1000, max: 30 })
+const imageLimiter = createRateLimiter({ name: 'image', windowMs: 60 * 1000, max: 10 })
+const liveblocksLimiter = createRateLimiter({ name: 'liveblocks', windowMs: 60 * 1000, max: 60 })
+
+const aiConcurrency = createConcurrencyLimiter({
+  name: 'ai',
+  globalMax: Number(process.env.AI_MAX_CONCURRENT) || 200,
+  perUserMax: Number(process.env.AI_MAX_CONCURRENT_PER_USER) || 3,
+})
+
+// Verify a Supabase access token locally when the project uses asymmetric JWT
+// signing keys. getClaims() caches the JWKS inside the Supabase client.
+async function getUserFromToken(token) {
+  if (!token || !supabaseAdmin) return null
+
+  try {
+    if (typeof supabaseAdmin.auth.getClaims === 'function') {
+      const { data, error } = await supabaseAdmin.auth.getClaims(token)
+
+      if (error || !data?.claims?.sub) return null
+
+      return {
+        id: data.claims.sub,
+        email: data.claims.email,
+        user_metadata: data.claims.user_metadata || {},
+        app_metadata: data.claims.app_metadata || {},
+      }
+    }
+
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
+    if (error || !user) return null
+    return user
+  } catch {
+    return null
+  }
+}
+
+async function requireUser(req, res, next) {
+  const token = extractBearerToken(req)
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required' })
+  }
+
+  const user = await getUserFromToken(token)
+
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid or expired token' })
+  }
+
+  req.user = user
+  return next()
+}
+
+async function assertSessionParticipant(sessionId, userId) {
+  if (!sessionId || !userId) return false
+
+  const { data, error } = await supabaseAdmin
+    .from('session_participants')
+    .select('session_id')
+    .eq('session_id', sessionId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    console.warn('[WARN] Session membership check failed:', error.message)
+    return false
+  }
+
+  return !!data
+}
 
 // ── API Key encryption ─────────────────────────────────────────
 // User-supplied LLM API keys are encrypted at rest in Supabase using AES-256-GCM.
@@ -162,14 +251,7 @@ function extractBearerToken(req) {
 
 // Verify an access token via the admin client and return the user (or null).
 async function verifyAccessToken(token) {
-  if (!token || !supabaseAdmin) return null
-  try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
-    if (error || !user) return null
-    return user
-  } catch {
-    return null
-  }
+  return getUserFromToken(token)
 }
 
 // Health check endpoint
@@ -203,7 +285,7 @@ app.use('/api/auth', (req, res, next) => {
 })
 
 // POST /api/auth/signin — exchange email/password for a session via the admin client
-app.post('/api/auth/signin', async (req, res) => {
+app.post('/api/auth/signin', authLimiter, async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' })
@@ -219,7 +301,7 @@ app.post('/api/auth/signin', async (req, res) => {
 })
 
 // POST /api/auth/signup — create a new user account
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authLimiter, async (req, res) => {
   const { email, password, name } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' })
@@ -273,7 +355,7 @@ app.get('/api/auth/session', async (req, res) => {
 })
 
 // POST /api/auth/reset-password — send a password-reset email
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', authLimiter, async (req, res) => {
   const { email } = req.body
   if (!email) return res.status(400).json({ error: 'Email is required' })
   try {
@@ -292,7 +374,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // for a session. The client-side Supabase client normally handles this
 // automatically, but in some edge cases (e.g. the code arrives in the URL
 // fragment) it can be useful to exchange it here.
-app.post('/api/auth/exchange-code-for-session', async (req, res) => {
+app.post('/api/auth/exchange-code-for-session', authLimiter, async (req, res) => {
   const { code } = req.body
   if (!code) return res.status(400).json({ error: 'Auth code is required' })
   try {
@@ -322,10 +404,8 @@ app.post('/api/auth/update-password', async (req, res) => {
 })
 
 // PATCH /api/auth/user — update the authenticated user's metadata
-app.patch('/api/auth/user', async (req, res) => {
-  const token = extractBearerToken(req)
-  const user = await verifyAccessToken(token)
-  if (!user) return res.status(401).json({ error: 'Not authenticated' })
+app.patch('/api/auth/user', requireUser, async (req, res) => {
+  const user = req.user
   try {
     const { error } = await supabaseAdmin.auth.admin.updateUser(user.id, translateUserUpdates(req.body))
     if (error) return res.status(400).json({ error: error.message })
@@ -344,7 +424,7 @@ const liveblocks = process.env.LIVEBLOCKS_SECRET_KEY
   ? new Liveblocks({ secret: process.env.LIVEBLOCKS_SECRET_KEY })
   : null
 
-app.post('/api/liveblocks-auth', async (req, res) => {
+app.post('/api/liveblocks-auth', requireUser, liveblocksLimiter, async (req, res) => {
   if (!liveblocks) {
     return res.status(503).json({
       error: 'Liveblocks not configured on server',
@@ -352,47 +432,34 @@ app.post('/api/liveblocks-auth', async (req, res) => {
     })
   }
 
-  // Pull Supabase auth from headers (browser sends the access token after login).
-  const authHeader = req.headers.authorization || ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const hasSupabase = !!supabase
-  console.log('[DEBUG] Liveblocks auth header present:', !!authHeader, 'token present:', !!token, 'token length:', token?.length, 'supabase configured:', hasSupabase)
+  if (!supabaseAdmin) {
+    return res.status(503).json({ error: 'Liveblocks auth is not configured' })
+  }
 
-  if (!token || !supabase) {
-    const reason = !token ? 'no token' : 'supabase not configured on server'
-    console.log('[DEBUG] Liveblocks auth rejecting:', reason)
-    return res.status(401).json({
-      error: 'forbidden',
-      reason: 'Missing or invalid auth token. Sign in first.',
-    })
+  const { room } = req.body || {}
+
+  if (!room || typeof room !== 'string') {
+    return res.status(400).json({ error: 'room is required' })
   }
 
   try {
-    const { data: { user }, error: userErr } = await supabase.auth.getUser(token)
-    console.log('[DEBUG] Liveblocks supabase getUser:', !!user, 'userErr:', userErr?.message)
-    if (userErr || !user) {
-      return res.status(401).json({
+    const isParticipant = await assertSessionParticipant(room, req.user.id)
+
+    if (!isParticipant) {
+      return res.status(403).json({
         error: 'forbidden',
-        reason: 'Could not verify user identity.',
+        reason: 'You are not a participant in this collaboration session.',
       })
     }
 
-    const { room } = req.body || {}
-    const session = liveblocks.prepareSession(user.id, {
+    const session = liveblocks.prepareSession(req.user.id, {
       userInfo: {
-        name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-        avatar: user.user_metadata?.avatar_url || undefined,
+        name: req.user.user_metadata?.name || req.user.email?.split('@')[0] || 'User',
+        avatar: req.user.user_metadata?.avatar_url || undefined,
       },
     })
 
-    // If a specific room is requested, grant full access; otherwise allow the
-    // session to enter any room the client asks for (Liveblocks will validate
-    // room access server-side per the project's ACL settings).
-    if (room && typeof room === 'string') {
-      session.allow(room, session.FULL_ACCESS)
-    } else {
-      session.allow('*', session.FULL_ACCESS)
-    }
+    session.allow(room, session.FULL_ACCESS)
 
     const { status, body } = await session.authorize()
     const parsed = typeof body === 'string' ? JSON.parse(body) : body
@@ -404,19 +471,6 @@ app.post('/api/liveblocks-auth', async (req, res) => {
       detail: error.message,
     })
   }
-})
-
-// Logging middleware
-app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object') {
-    console.log(`[DEBUG] Received AI request:`, {
-      prompt: req.body.prompt,
-      modelId: req.body.modelId,
-      type: req.body.type,
-      historyCount: req.body.messages?.length || 0
-    })
-  }
-  next()
 })
 
 // ── History helpers ─────────────────────────────────────────
@@ -621,7 +675,7 @@ const tools = {
 // Given a tool call from the LLM, look up the tool and run it.
 async function executeToolCall(toolCall) {
   const toolName = toolCall.function?.name || toolCall.name
-  let args = {}
+  let args
   try {
     args = typeof toolCall.function?.arguments === 'string'
       ? JSON.parse(toolCall.function.arguments)
@@ -684,7 +738,8 @@ function resolveProvider(modelId = '') {
 }
 
 // ── OpenAI ─────────────────────────────────────────────────
-async function callOpenAI(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto') {
+async function callOpenAI(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto', options = {}) {
+  const { signal, timeout = 45_000 } = options
   let model = 'gpt-4o'
   if (modelId.includes('gpt-4o-mini')) model = 'gpt-4o-mini'
   else if (modelId.includes('gpt-4o')) model = 'gpt-4o'
@@ -708,7 +763,9 @@ async function callOpenAI(prompt, modelId, apiKey, type, historyMessages = [], t
   }
 
   const res = await axios.post(url, body, {
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    signal,
+    timeout,
   })
   const choice = res.data.choices?.[0]
   const message = choice?.message
@@ -737,7 +794,9 @@ async function callOpenAI(prompt, modelId, apiKey, type, historyMessages = [], t
       max_tokens: 1000,
     }
     const followUpRes = await axios.post(url, followUpBody, {
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      signal,
+      timeout,
     })
     const finalText = followUpRes.data.choices?.[0]?.message?.content
     return { text: finalText, provider: 'openai', modelId, toolResults }
@@ -756,7 +815,8 @@ async function callOpenAI(prompt, modelId, apiKey, type, historyMessages = [], t
 }
 
 // ── Anthropic ──────────────────────────────────────────────
-async function callAnthropic(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto') {
+async function callAnthropic(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto', options = {}) {
+  const { signal, timeout = 45_000 } = options
   let model = 'claude-3-5-sonnet-latest'
   if (modelId.includes('claude-3-opus')) model = 'claude-3-opus-latest'
   else if (modelId.includes('claude-3-haiku')) model = 'claude-3-haiku-20240307'
@@ -781,7 +841,9 @@ async function callAnthropic(prompt, modelId, apiKey, type, historyMessages = []
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
-    }
+    },
+    signal,
+    timeout,
   })
   const content = res.data.content || []
 
@@ -814,7 +876,9 @@ async function callAnthropic(prompt, modelId, apiKey, type, historyMessages = []
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
-      }
+      },
+      signal,
+      timeout,
     })
     const finalContent = followUpRes.data.content || []
     const finalText = finalContent.filter(b => b.type === 'text').map(b => b.text).join('') || 'Done.'
@@ -834,7 +898,8 @@ async function callAnthropic(prompt, modelId, apiKey, type, historyMessages = []
 }
 
 // ── Google Gemini ─────────────────────────────────────────
-async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto') {
+async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages = [], tools = null, _toolChoice = 'auto', options = {}) {
+  const { signal, timeout = 45_000 } = options
   let modelName = 'gemini-2.0-flash'
   if (modelId.includes('gemini-2.5-pro') || (modelId.includes('gemini-pro') && !modelId.includes('flash'))) modelName = 'gemini-2.5-pro'
   else if (modelId.includes('gemini-2.5-flash-image')) modelName = 'gemini-2.5-flash-image'
@@ -862,7 +927,11 @@ async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages =
     requestBody.tools = [{ functionDeclarations: tools }]
   }
 
-  const res = await axios.post(url, requestBody, { headers: { 'Content-Type': 'application/json' } })
+  const res = await axios.post(url, requestBody, {
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    timeout,
+  })
   const data = res.data || {}
   const candidate = data.candidates?.[0]
   const parts = candidate?.content?.parts || []
@@ -896,7 +965,11 @@ async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages =
     if (tools && tools.length > 0) {
       followUpBody.tools = [{ functionDeclarations: tools }]
     }
-    const followUpRes = await axios.post(url, followUpBody, { headers: { 'Content-Type': 'application/json' } })
+    const followUpRes = await axios.post(url, followUpBody, {
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      timeout,
+    })
     const followUpData = followUpRes.data || {}
     let text = followUpData.candidates?.[0]?.content?.parts?.[0]?.text
       || followUpData.message
@@ -981,10 +1054,16 @@ async function callGoogleGemini(prompt, modelId, apiKey, type, historyMessages =
 async function withRetry(fn, options = {}) {
   const maxAttempts = options.maxAttempts || 3
   const baseDelayMs = options.baseDelayMs || 500
+  const signal = options.signal
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn(attempt)
     } catch (err) {
+      if (signal?.aborted || err.name === 'AbortError' || err.code === 'ABORT_ERR') {
+        throw err
+      }
+
       const status = err.response?.status
       const is429 = status === 429
       const is5xx = status && status >= 500 && status < 600
@@ -1007,14 +1086,16 @@ async function withRetry(fn, options = {}) {
           }
         }
       }
-      console.log(`[DEBUG] Retrying (attempt ${attempt + 1}/${maxAttempts}) after ${Math.round(delay)}ms — last error: ${err.message}`)
+      // Add jitter so a fleet of instances does not retry in lockstep.
+      delay += Math.floor(Math.random() * 250)
       await new Promise(resolve => setTimeout(resolve, delay))
     }
   }
 }
 
-async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto') {
-  let actualModel = modelId.replace(/^openrouter\//, '')
+async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [], tools = null, toolChoice = 'auto', options = {}) {
+  const actualModel = modelId.replace(/^openrouter\//, '')
+  const { signal, timeout = 30_000 } = options
 
   const messages = buildHistory(historyMessages, prompt, type === 'structured' ? 'You are a data visualization assistant. Return ONLY a valid JSON object with keys: type (bar|line|pie|table), title (string), data (array of {label, value}). No markdown, no explanation.' : null)
 
@@ -1024,10 +1105,6 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
     'HTTP-Referer': 'https://zac-ai.netlify.app',
     'X-Title': 'Zac-AI-Dashboard'
   }
-  console.log('[DEBUG] OpenRouter request headers:', {
-    ...headers,
-    Authorization: headers.Authorization ? `${headers.Authorization.slice(0, 15)}...` : undefined
-  })
 
   const body = {
     model: actualModel,
@@ -1042,8 +1119,9 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
   const response = await withRetry(() => axios.post('https://openrouter.ai/api/v1/chat/completions', body, {
     headers,
     maxRedirects: 0,
-    timeout: 30000,
-  }), { maxAttempts: 3, baseDelayMs: 1000 })
+    timeout,
+    signal,
+  }), { maxAttempts: 3, baseDelayMs: 1000, signal })
 
   const choice = response.data.choices?.[0]
   const message = choice?.message
@@ -1067,8 +1145,9 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
     const followUpRes = await withRetry(() => axios.post('https://openrouter.ai/api/v1/chat/completions', followUpBody, {
       headers,
       maxRedirects: 0,
-      timeout: 30000,
-    }), { maxAttempts: 3, baseDelayMs: 1000 })
+      timeout,
+      signal,
+    }), { maxAttempts: 3, baseDelayMs: 1000, signal })
     const finalText = followUpRes.data.choices?.[0]?.message?.content
     return { text: finalText, provider: 'openrouter', modelId, toolResults }
   }
@@ -1091,7 +1170,7 @@ async function callOpenRouter(prompt, modelId, apiKey, type, historyMessages = [
 function classifyError(error, provider) {
   // Errors with no upstream response are local/backend issues (code).
   if (!error.response) {
-    if (error.code === 'ECONNABORTED') {
+    if (error.name === 'AbortError' || error.code === 'ABORT_ERR' || error.code === 'ECONNABORTED') {
       return { httpStatus: 504, code: 'UPSTREAM_TIMEOUT', kind: 'provider', message: `Upstream ${provider} timed out`, retriable: true }
     }
     if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'EAI_AGAIN') {
@@ -1124,87 +1203,142 @@ function classifyError(error, provider) {
 }
 
 // ── Main AI endpoint ──────────────────────────────────────
-app.post('/api/ai', async (req, res) => {
-  const { prompt, modelId = 'openrouter/google/gemma-4-26b-a4b-it:free', type = 'text', apiKey: userApiKey, userId: reqUserId, accessToken: reqToken, messages: historyMessages, tools: requestedTools, toolChoice } = req.body
-  const provider = resolveProvider(modelId)
+app.post('/api/ai', requireUser, aiLimiter, async (req, res) => {
+  const {
+    prompt,
+    modelId = 'openrouter/google/gemma-4-26b-a4b-it:free',
+    type = 'text',
+    messages: historyMessages,
+    tools: requestedTools,
+    toolChoice,
+  } = req.body
 
-  // ── Resolve the API key ───────────────────────────────────────
-  // Priority:
-  //   1. Explicitly passed by the client (backward compat).
-  //   2. Looked up from the user's encrypted model record in Supabase.
-  //   3. Falls back to the server-level env var (shared keys for free models).
-  let resolvedKey = userApiKey || null
-  let keySource = userApiKey ? 'client' : 'none'
+  const userId = req.user.id
 
-  if (!resolvedKey && reqUserId) {
-    const lookup = await lookupUserModelKey(reqUserId, modelId)
-    if (lookup?.api_key) {
-      resolvedKey = lookup.api_key
-      keySource = 'database'
-    }
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'prompt is required' })
   }
 
-  console.log(`[DEBUG] Provider: ${provider} | model: ${modelId} | type: ${type} | keySource: ${keySource} | history: ${historyMessages?.length || 0} | tools: ${requestedTools?.length || 0}`)
+  if (prompt.length > 20_000) {
+    return res.status(413).json({ error: 'prompt is too long', code: 'PROMPT_TOO_LONG' })
+  }
 
-  // Build the actual tools array based on what the client requested.
-  // Only allow tools that are registered on the server (security: we don't
-  // let the client inject arbitrary tool definitions).
+  if (typeof modelId !== 'string' || modelId.length === 0 || modelId.length > 300) {
+    return res.status(400).json({ error: 'modelId must be a string', code: 'INVALID_MODEL' })
+  }
+
+  if (!['text', 'structured', 'image'].includes(type)) {
+    return res.status(400).json({ error: 'type must be text, structured, or image', code: 'INVALID_TYPE' })
+  }
+
+  const provider = resolveProvider(modelId)
+
+  const safeHistory = Array.isArray(historyMessages)
+    ? historyMessages
+        .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .slice(-30)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 8_000) }))
+    : []
+
+  // ── Resolve the API key ───────────────────────────────────────
+  // The client never supplies the raw key. The server looks up the user's
+  // encrypted model record, then falls back to the server-level env key for
+  // free/shared models.
+  let resolvedKey = null
+
+  const lookup = await lookupUserModelKey(userId, modelId)
+  if (lookup?.api_key) {
+    resolvedKey = lookup.api_key
+  }
+
   let toolDefs = null
-  if (requestedTools && requestedTools.length > 0) {
+  if (Array.isArray(requestedTools) && requestedTools.length > 0) {
     const allDefs = (provider === 'google' ? getGeminiFunctionDeclarations() : getToolDefinitions())
-    const wantedNames = new Set(requestedTools.map(t => (typeof t === 'string' ? t : t.name)))
+    const wantedNames = new Set(requestedTools.map(t => (typeof t === 'string' ? t : t?.name)))
     toolDefs = allDefs.filter(d => wantedNames.has(d.name))
   }
 
+  let releaseSlot
+
   try {
+    releaseSlot = await aiConcurrency.acquire(req)
+  } catch (error) {
+    return res.status(error.statusCode || 429).json({
+      error: error.message,
+      code: error.code || 'AI_CAPACITY',
+      kind: 'code',
+      retriable: true,
+    })
+  }
+
+  const controller = new AbortController()
+  const requestTimeout = setTimeout(() => controller.abort(), 60_000)
+  const abortClientRequest = () => {
+    if (!res.writableEnded) controller.abort()
+  }
+
+  req.on('aborted', abortClientRequest)
+  res.on('close', abortClientRequest)
+
+  try {
+    const providerOptions = { signal: controller.signal, timeout: 45_000 }
     let result
 
     if (provider === 'openai') {
       const key = resolvedKey || process.env.OPENAI_API_KEY
       if (!key) throw Object.assign(new Error('Missing OPENAI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENAI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
-      result = await callOpenAI(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
+      result = await callOpenAI(prompt, modelId, key, type, safeHistory, toolDefs, toolChoice, providerOptions)
     } else if (provider === 'anthropic') {
       const key = resolvedKey || process.env.ANTHROPIC_API_KEY
       if (!key) throw Object.assign(new Error('Missing ANTHROPIC_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'ANTHROPIC_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
-      result = await callAnthropic(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
+      result = await callAnthropic(prompt, modelId, key, type, safeHistory, toolDefs, toolChoice, providerOptions)
     } else if (provider === 'google') {
       const key = resolvedKey || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
       if (!key) throw Object.assign(new Error('Missing GOOGLE_GEMINI_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'GOOGLE_GEMINI_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
-      result = await callGoogleGemini(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
+      result = await callGoogleGemini(prompt, modelId, key, type, safeHistory, toolDefs, toolChoice, providerOptions)
     } else if (provider === 'openrouter') {
       const key = resolvedKey || process.env.OPENROUTER_API_KEY
-      console.log('[DEBUG] OpenRouter key present:', !!key, 'length:', key?.length)
       if (!key) throw Object.assign(new Error('Missing OPENROUTER_API_KEY on server'), { _classified: { httpStatus: 503, code: 'MISSING_API_KEY', kind: 'code', message: 'OPENROUTER_API_KEY is not configured on the server. Set it in the Render dashboard.' } })
-      result = await callOpenRouter(prompt, modelId, key, type, historyMessages, toolDefs, toolChoice)
+      result = await callOpenRouter(prompt, modelId, key, type, safeHistory, toolDefs, toolChoice, providerOptions)
     } else {
       throw Object.assign(new Error(`Unsupported provider: ${provider}`), { _classified: { httpStatus: 400, code: 'UNSUPPORTED_PROVIDER', kind: 'code', message: `Unsupported provider for model ${modelId}` } })
     }
 
-    res.json(result)
+    if (!res.writableEnded) res.json(result)
   } catch (error) {
     const classified = error._classified || classifyError(error, provider)
     console.error('[ERROR] AI API error:', classified.code, '-', classified.message)
-    if (classified.providerBody) {
-      console.error('[ERROR] Provider response:', JSON.stringify(classified.providerBody).slice(0, 500))
+
+    if (!res.writableEnded) {
+      res.status(classified.httpStatus).json({
+        error: classified.message,
+        code: classified.code,
+        kind: classified.kind,
+        provider,
+        modelId,
+        retriable: classified.retriable,
+        providerStatus: classified.providerStatus || null,
+        detail: classified.providerBody || null,
+      })
     }
-    res.status(classified.httpStatus).json({
-      error: classified.message,
-      code: classified.code,
-      kind: classified.kind,
-      provider,
-      modelId,
-      retriable: classified.retriable,
-      providerStatus: classified.providerStatus || null,
-      detail: classified.providerBody || null,
-    })
+  } finally {
+    clearTimeout(requestTimeout)
+    await releaseSlot?.()
+    req.off('aborted', abortClientRequest)
+    res.off('close', abortClientRequest)
   }
 })
 
-app.get('/api/image', async (req, res) => {
-  const prompt = (req.query.prompt || '').trim()
+app.get('/api/image', requireUser, imageLimiter, async (req, res) => {
+  const prompt = String(req.query.prompt || '').trim()
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' })
 
-  const encoded = encodeURIComponent(prompt)
+  if (prompt.length > 2_000) {
+    return res.status(413).json({ error: 'prompt is too long', code: 'PROMPT_TOO_LONG' })
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20_000)
 
   try {
     const hfKey = process.env.HUGGING_FACE_API_KEY || process.env.HF_API_KEY
@@ -1218,6 +1352,7 @@ app.get('/api/image', async (req, res) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ inputs: prompt }),
+        signal: controller.signal,
       })
 
       if (hfRes.ok) {
@@ -1227,71 +1362,122 @@ app.get('/api/image', async (req, res) => {
         return res.json({ imageUrl, provider: 'huggingface', modelId: model })
       }
 
-      console.warn('[WARN] HF image generation failed:', hfRes.status, await hfRes.text())
+      console.warn('[WARN] HF image generation failed:', hfRes.status)
     }
   } catch (error) {
-    console.warn('[WARN] HF image generation error:', error.message)
+    console.warn('[WARN] HF image generation error:', error.name === 'AbortError' ? 'timed out' : error.message)
+  } finally {
+    clearTimeout(timeout)
   }
 
-  const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?model=flux&nologo=true`
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=flux&nologo=true`
   res.json({ imageUrl, provider: 'pollinations', modelId: 'pollinations/free-image' })
 })
 
-app.get('/api/proxy-image', async (req, res) => {
-  const url = (req.query.url || '').trim()
+app.get('/api/proxy-image', requireUser, proxyLimiter, async (req, res) => {
+  const url = String(req.query.url || '').trim()
   if (!url) return res.status(400).json({ error: 'Missing url' })
 
+  const controller = new AbortController()
+  const abortStream = () => controller.abort()
+
+  req.on('aborted', abortStream)
+  res.on('close', abortStream)
+
   try {
-    const upstream = await fetch(url)
+    const upstream = await fetchAllowedImage(url, { signal: controller.signal })
+
     if (!upstream.ok) {
       return res.status(upstream.status).json({ error: `Upstream responded with ${upstream.status}` })
     }
 
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
-    res.setHeader('Content-Type', contentType)
-    res.setHeader('Content-Disposition', 'attachment')
+    const contentType = upstream.headers.get('content-type') || ''
+    const mime = contentType.split(';')[0].trim().toLowerCase()
+    const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'])
 
-    if (upstream.body) {
-      const reader = upstream.body.getReader()
-      const pump = () => {
-        reader.read().then(({ done, value }) => {
-          if (done) {
+    if (!allowedImageTypes.has(mime)) {
+      return res.status(415).json({ error: 'URL did not return a supported image' })
+    }
+
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Disposition', 'inline')
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+
+    const contentLength = Number(upstream.headers.get('content-length') || 0)
+    if (contentLength > 10 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Image is too large' })
+    }
+
+    if (!upstream.body) {
+      return res.end()
+    }
+
+    const reader = upstream.body.getReader()
+    let received = 0
+    let ended = false
+
+    const pump = () => {
+      reader.read().then(({ done, value }) => {
+        if (ended) return
+        if (done) {
+          ended = true
+          res.end()
+          return
+        }
+
+        received += value.byteLength
+        if (received > 10 * 1024 * 1024) {
+          ended = true
+          reader.cancel().catch(() => {})
+          res.destroy(new Error('Image is too large'))
+          return
+        }
+
+        res.write(Buffer.from(value), (err) => {
+          if (err) {
+            ended = true
+            reader.cancel().catch(() => {})
             res.end()
             return
           }
-          res.write(Buffer.from(value.buffer), (err) => {
-            if (err) return res.end()
-            pump()
-          })
-        }).catch(() => res.end())
-      }
-      pump()
-    } else {
-      res.end()
+          pump()
+        })
+      }).catch((error) => {
+        if (ended) return
+        ended = true
+        if (!res.writableEnded) res.end()
+        if (error?.name !== 'AbortError') console.warn('[WARN] Image proxy stream failed:', error.message)
+      })
     }
+
+    pump()
   } catch (error) {
-    console.error('[ERROR] Image proxy failed:', error.message)
-    res.status(500).json({ error: 'Image proxy failed', detail: error.message })
+    if (!res.writableEnded) {
+      const status = error.statusCode || (error.name === 'AbortError' ? 499 : 500)
+      res.status(status).json({ error: error.message || 'Image proxy failed', code: error.code })
+    }
+  } finally {
+    req.off('aborted', abortStream)
+    res.off('close', abortStream)
   }
 })
 
-app.get('/api/dashboard', async (req, res) => {
-  const userId = req.query.userId
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
+app.get('/api/dashboard', requireUser, modelLimiter, async (req, res) => {
+  const userId = req.user.id
 
   try {
-    if (!supabase) {
+    if (!supabaseAdmin) {
       return res.status(500).json({ error: 'Supabase not configured on backend' })
     }
 
-    const { data: aiModels, error: modelsError } = await supabase
+    const { data: aiModels, error: modelsError } = await supabaseAdmin
       .from('ai_models')
       .select('*')
       .eq('user_id', userId)
 
     if (modelsError) throw modelsError
 
-    const { data: analytics, error: analyticsError } = await supabase
+    const { data: analytics, error: analyticsError } = await supabaseAdmin
       .from('analytics_data')
       .select('*')
       .eq('user_id', userId)
@@ -1338,10 +1524,9 @@ app.get('/api/dashboard', async (req, res) => {
 // The /api/ai endpoint never receives raw keys from the client — it
 // looks them up server-side via lookupUserModelKey().
 
-// GET /api/models?userId=xxx — list a user's AI models (keys masked)
-app.get('/api/models', async (req, res) => {
-  const userId = req.query.userId
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
+// GET /api/models — list the current user's AI models (keys masked)
+app.get('/api/models', requireUser, modelLimiter, async (req, res) => {
+  const userId = req.user.id
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
@@ -1353,7 +1538,6 @@ app.get('/api/models', async (req, res) => {
 
     if (error) throw error
 
-    // Mask API keys — raw keys stay server-side only.
     const masked = (data || []).map(m => ({
       ...m,
       api_key: m.api_key ? maskApiKey(m.api_key) : '',
@@ -1361,15 +1545,14 @@ app.get('/api/models', async (req, res) => {
     res.json({ aiModels: masked })
   } catch (error) {
     console.error('[ERROR] Failed to list models:', error.message)
-    res.status(500).json({ error: 'Failed to fetch models', detail: error.message })
+    res.status(500).json({ error: 'Failed to fetch models' })
   }
 })
 
-// GET /api/models/:id?userId=xxx — fetch a single model with decrypted api_key
-// (used when the user clicks "Reveal" in the edit modal)
-app.get('/api/models/:id', async (req, res) => {
+// GET /api/models/:id — fetch one of the current user's models
+app.get('/api/models/:id', requireUser, modelLimiter, async (req, res) => {
   const id = req.params.id
-  const userId = req.query.userId
+  const userId = req.user.id
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
@@ -1378,43 +1561,42 @@ app.get('/api/models/:id', async (req, res) => {
       .from('ai_models')
       .select('*')
       .eq('id', id)
-      .eq(userId ? 'user_id' : 'id', userId || id)
+      .eq('user_id', userId)
       .maybeSingle()
 
     if (error) throw error
     if (!data) return res.status(404).json({ error: 'Model not found' })
 
-    // Decrypt the api_key for display in the edit modal.
     const decrypted = { ...data, api_key: decryptApiKey(data.api_key) || '' }
     res.json({ aiModel: decrypted })
   } catch (error) {
     console.error('[ERROR] Failed to fetch model:', error.message)
-    res.status(500).json({ error: 'Failed to fetch model', detail: error.message })
+    res.status(500).json({ error: 'Failed to fetch model' })
   }
 })
 
-// POST /api/models — create a model (api_key encrypted server-side)
-app.post('/api/models', async (req, res) => {
-  const userId = req.body.user_id
-  if (!userId || !req.body.name || !req.body.provider || !req.body.model_id) {
-    return res.status(400).json({ error: 'Missing required fields: name, provider, model_id, user_id' })
+// POST /api/models — create a model for the current user
+app.post('/api/models', requireUser, modelLimiter, async (req, res) => {
+  const userId = req.user.id
+
+  if (!req.body.name || !req.body.provider || !req.body.model_id) {
+    return res.status(400).json({ error: 'Missing required fields: name, provider, model_id' })
   }
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
 
     const model = {
-      name: req.body.name,
-      provider: req.body.provider,
-      model_id: req.body.model_id,
-      // Store the key encrypted — never plaintext.
-      api_key: req.body.api_key ? encryptApiKey(req.body.api_key) : null,
-      endpoint: req.body.endpoint || null,
-      status: req.body.status || 'active',
-      cost: req.body.cost ?? 0,
-      latency: req.body.latency ?? 0,
-      api_requests: req.body.api_requests ?? 0,
-      tokens_processed: req.body.tokens_processed ?? 0,
+      name: String(req.body.name).slice(0, 120),
+      provider: String(req.body.provider).slice(0, 80),
+      model_id: String(req.body.model_id).slice(0, 200),
+      api_key: req.body.api_key ? encryptApiKey(String(req.body.api_key)) : null,
+      endpoint: req.body.endpoint ? String(req.body.endpoint).slice(0, 500) : null,
+      status: req.body.status === 'inactive' ? 'inactive' : 'active',
+      cost: Number(req.body.cost) || 0,
+      latency: Number(req.body.latency) || 0,
+      api_requests: Number(req.body.api_requests) || 0,
+      tokens_processed: Number(req.body.tokens_processed) || 0,
       user_id: userId,
       created_at: new Date().toISOString(),
     }
@@ -1422,62 +1604,80 @@ app.post('/api/models', async (req, res) => {
     const { error } = await supabaseAdmin.from('ai_models').insert([model])
     if (error) throw error
 
-    // Return the model with a masked key.
     const saved = { ...model, api_key: model.api_key ? maskApiKey(model.api_key) : '' }
     res.json({ aiModel: saved })
   } catch (error) {
     console.error('[ERROR] Failed to create model:', error.message)
-    res.status(500).json({ error: 'Failed to create model', detail: error.message })
+    res.status(500).json({ error: 'Failed to create model' })
   }
 })
 
-// PUT /api/models/:id — update a model (api_key re-encrypted if provided)
-app.put('/api/models/:id', async (req, res) => {
+// PUT /api/models/:id — update one of the current user's models
+app.put('/api/models/:id', requireUser, modelLimiter, async (req, res) => {
   const id = req.params.id
   const { api_key, ...updates } = req.body
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
 
-    const patch = { ...updates }
-    // If a new api_key is provided, encrypt it before storing.
-    // If the value is a masked placeholder (contains "••••"), the user
-    // didn't change the key — leave the existing encrypted value untouched.
-    if (api_key !== undefined && !api_key.includes('••••')) {
+    // Prevent mass-assignment: only known model fields may be updated, and
+    // ownership fields can never be changed through the API.
+    const patch = {}
+    for (const field of ['name', 'provider', 'model_id', 'endpoint', 'status', 'cost', 'latency', 'api_requests', 'tokens_processed']) {
+      if (Object.prototype.hasOwnProperty.call(updates, field)) patch[field] = updates[field]
+    }
+
+    if (api_key !== undefined && typeof api_key === 'string' && !api_key.includes('••••')) {
       patch.api_key = api_key ? encryptApiKey(api_key) : null
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'No updatable fields supplied' })
     }
 
     const { data, error } = await supabaseAdmin
       .from('ai_models')
       .update(patch)
       .eq('id', id)
+      .eq('user_id', req.user.id)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) throw error
+    if (!data) return res.status(404).json({ error: 'Model not found' })
 
     const saved = { ...data, api_key: data.api_key ? maskApiKey(data.api_key) : '' }
     res.json({ aiModel: saved })
   } catch (error) {
     console.error('[ERROR] Failed to update model:', error.message)
-    res.status(500).json({ error: 'Failed to update model', detail: error.message })
+    res.status(500).json({ error: 'Failed to update model' })
   }
 })
 
-// DELETE /api/models/:id — delete a model
-app.delete('/api/models/:id', async (req, res) => {
+// DELETE /api/models/:id — delete one of the current user's models
+app.delete('/api/models/:id', requireUser, modelLimiter, async (req, res) => {
   const id = req.params.id
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured for model management' })
 
-    const { error } = await supabaseAdmin.from('ai_models').delete().eq('id', id)
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from('ai_models')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .maybeSingle()
+
+    if (lookupError) throw lookupError
+    if (!existing) return res.status(404).json({ error: 'Model not found' })
+
+    const { error } = await supabaseAdmin.from('ai_models').delete().eq('id', id).eq('user_id', req.user.id)
     if (error) throw error
 
     res.json({ success: true })
   } catch (error) {
     console.error('[ERROR] Failed to delete model:', error.message)
-    res.status(500).json({ error: 'Failed to delete model', detail: error.message })
+    res.status(500).json({ error: 'Failed to delete model' })
   }
 })
 
@@ -1487,48 +1687,66 @@ app.delete('/api/models/:id', async (req, res) => {
 // We use Postgres ILIKE substring matching so it works without an embeddings API
 // key — but the structure is designed to be swapped for vector similarity later.
 
-// GET /api/knowledge?sessionId=xxx — list all knowledge documents for a session
-app.get('/api/knowledge', async (req, res) => {
+// GET /api/knowledge?sessionId=xxx — list knowledge documents for a session
+app.get('/api/knowledge', requireUser, knowledgeLimiter, async (req, res) => {
   const sessionId = req.query.sessionId
   if (!sessionId) return res.status(400).json({ error: 'sessionId is required' })
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
 
-    const { data, error } = await supabaseAdmin
-      .from('knowledge_documents')
-      .select('id, session_id, user_id, title, content, created_at, updated_at')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: false })
+    if (!(await assertSessionParticipant(sessionId, req.user.id))) {
+      return res.status(403).json({ error: 'Not a participant in this session' })
+    }
 
-    if (error) throw error
-    res.json({ documents: data || [] })
+    let documents = []
+
+    const { data, error } = await supabaseAdmin.rpc('list_knowledge_documents', {
+      p_session_id: sessionId,
+      p_limit: 200,
+    })
+
+    if (error) {
+      if (error.code !== 'PGRST202' && !/could not find the function/i.test(error.message || '')) {
+        throw error
+      }
+
+      const { data: fallback, error: fallbackError } = await supabaseAdmin
+        .from('knowledge_documents')
+        .select('id, session_id, user_id, title, content, created_at, updated_at')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(200)
+
+      if (fallbackError) throw fallbackError
+      documents = (fallback || []).map((doc) => ({ ...doc, content: String(doc.content || '').slice(0, 500) }))
+    } else {
+      documents = data || []
+    }
+
+    res.json({ documents })
   } catch (error) {
     console.error('[ERROR] Failed to list knowledge docs:', error.message)
-    res.status(500).json({ error: 'Failed to fetch knowledge documents', detail: error.message })
+    res.status(500).json({ error: 'Failed to fetch knowledge documents' })
   }
 })
 
-// POST /api/knowledge — create or append to a knowledge document
-app.post('/api/knowledge', async (req, res) => {
-  const { sessionId, userId, title, content } = req.body
+// POST /api/knowledge — create a knowledge document in a session
+app.post('/api/knowledge', requireUser, knowledgeLimiter, async (req, res) => {
+  const { sessionId, title, content } = req.body
+
   if (!sessionId || !title || !content) {
     return res.status(400).json({ error: 'Missing required fields: sessionId, title, content' })
+  }
+
+  if (String(content).length > 500_000) {
+    return res.status(413).json({ error: 'Document is too large', code: 'DOCUMENT_TOO_LARGE' })
   }
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
 
-    // Verify the user is a participant in the session (RLS is enforced, but we
-    // double-check here so we can return a clean 403 instead of a generic error).
-    const { data: participant, error: checkErr } = await supabaseAdmin
-      .from('session_participants')
-      .select('session_id')
-      .eq('session_id', sessionId)
-      .eq('user_id', userId)
-      .maybeSingle()
-
-    if (checkErr || !participant) {
+    if (!(await assertSessionParticipant(sessionId, req.user.id))) {
       return res.status(403).json({ error: 'Not a participant in this session' })
     }
 
@@ -1536,9 +1754,9 @@ app.post('/api/knowledge', async (req, res) => {
       .from('knowledge_documents')
       .insert({
         session_id: sessionId,
-        user_id: userId,
-        title,
-        content,
+        user_id: req.user.id,
+        title: String(title).slice(0, 300),
+        content: String(content),
       })
       .select()
       .single()
@@ -1547,127 +1765,159 @@ app.post('/api/knowledge', async (req, res) => {
     res.json({ document: data })
   } catch (error) {
     console.error('[ERROR] Failed to create knowledge doc:', error.message)
-    res.status(500).json({ error: 'Failed to create knowledge document', detail: error.message })
+    res.status(500).json({ error: 'Failed to create knowledge document' })
   }
 })
 
-// POST /api/knowledge/search — RAG: find relevant chunks given a query
-//
-// Request body: { sessionId, query, topK = 5, maxChunkLength = 1000 }
-//
-// Returns matching documents with their content (already chunked) and a
-// simple relevance score based on keyword overlap.
-app.post('/api/knowledge/search', async (req, res) => {
-  const { sessionId, query, topK = 5, maxChunkLength = 1000 } = req.body
+// POST /api/knowledge/search — RAG: find relevant chunks given a query.
+// Uses the Postgres full-text index installed by 06_performance.sql. If the
+// migration has not been applied yet (local dev), it falls back to a bounded
+// keyword scan so the feature still works.
+app.post('/api/knowledge/search', requireUser, knowledgeLimiter, async (req, res) => {
+  const { sessionId, query } = req.body
+  const topK = Math.min(10, Math.max(1, Number(req.body.topK) || 5))
+  const maxChunkLength = Math.min(2_000, Math.max(200, Number(req.body.maxChunkLength) || 1_000))
+
   if (!sessionId || !query) {
     return res.status(400).json({ error: 'Missing required fields: sessionId, query' })
+  }
+
+  if (String(query).length > 2_000) {
+    return res.status(413).json({ error: 'query is too long', code: 'QUERY_TOO_LONG' })
   }
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
 
-    const { data, error } = await supabaseAdmin
-      .from('knowledge_documents')
-      .select('id, title, content')
-      .eq('session_id', sessionId)
+    if (!(await assertSessionParticipant(sessionId, req.user.id))) {
+      return res.status(403).json({ error: 'Not a participant in this session' })
+    }
 
-    if (error) throw error
+    let results = []
 
-    const docs = data || []
-
-    // Simple keyword-overlap ranking.
-    // Tokenise the query into lowercase words and count how many unique query
-    // terms appear in each document's content.  Return the top-K by score.
-    const queryTerms = (query.toLowerCase().match(/[a-z0-9]+/g) || [])
-    const uniqueTerms = new Set(queryTerms)
-
-    const scored = docs.map(doc => {
-      const text = (doc.content || '').toLowerCase()
-      let score = 0
-      const matchedTerms = []
-      for (const term of uniqueTerms) {
-        const regex = new RegExp(term, 'gi')
-        const matches = text.match(regex)
-        if (matches) {
-          score += matches.length
-          matchedTerms.push(term)
-        }
-      }
-      // Bonus for title matches
-      const titleText = (doc.title || '').toLowerCase()
-      for (const term of uniqueTerms) {
-        if (titleText.includes(term)) score += 2
-      }
-      return {
-        docId: doc.id,
-        title: doc.title,
-        score,
-        matchedTerms,
-        content: doc.content,
-      }
+    const { data, error } = await supabaseAdmin.rpc('search_knowledge_documents', {
+      p_session_id: sessionId,
+      p_query: String(query),
+      p_top_k: topK,
     })
 
-    const results = scored
-      .filter(d => d.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK)
+    if (error) {
+      if (error.code !== 'PGRST202' && !/could not find the function/i.test(error.message || '')) {
+        throw error
+      }
 
-    // Chunk large documents so the AI doesn't get overwhelmed
-    const chunked = results.map(r => {
+      // Fallback for an un-migrated database. Bounded so a large session cannot
+      // exhaust the instance while scanning.
+      const { data: docs, error: listError } = await supabaseAdmin
+        .from('knowledge_documents')
+        .select('id, title, content')
+        .eq('session_id', sessionId)
+        .limit(200)
+
+      if (listError) throw listError
+
+      const queryTerms = new Set(String(query).toLowerCase().match(/[a-z0-9]+/g) || [])
+      results = (docs || [])
+        .map((doc) => {
+          const text = (doc.content || '').toLowerCase()
+          let score = 0
+          const matchedTerms = []
+
+          for (const term of queryTerms) {
+            const matches = text.split(term).length - 1
+            if (matches > 0) {
+              score += matches
+              matchedTerms.push(term)
+            }
+          }
+
+          const titleText = (doc.title || '').toLowerCase()
+          for (const term of queryTerms) {
+            if (titleText.includes(term)) score += 2
+          }
+
+          return { docId: doc.id, title: doc.title, score, matchedTerms, content: doc.content }
+        })
+        .filter((doc) => doc.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK)
+    } else {
+      results = (data || []).map((row) => ({
+        docId: row.doc_id,
+        title: row.title,
+        score: row.relevance,
+        matchedTerms: [],
+        content: row.content,
+      }))
+    }
+
+    const chunked = results.map((r) => {
       if (r.content.length <= maxChunkLength) {
         return { docId: r.docId, title: r.title, score: r.score, matchedTerms: r.matchedTerms, chunk: r.content }
       }
-      // Split into overlapping chunks and keep only the ones containing query terms
+
       const chunks = []
-      const overlap = 100
+      const overlap = Math.min(100, Math.floor(maxChunkLength / 4))
       for (let i = 0; i < r.content.length; i += maxChunkLength - overlap) {
-        chunks.push(r.content.slice(i, i + maxChunkLength))
+        chunks.push({ docId: r.docId, title: r.title, score: r.score, matchedTerms: r.matchedTerms, chunk: r.content.slice(i, i + maxChunkLength) })
       }
-      return chunks.map(chunk => ({ docId: r.docId, title: r.title, score: r.score, matchedTerms: r.matchedTerms, chunk }))
+      return chunks
     }).flat()
 
     res.json({ results: chunked })
   } catch (error) {
     console.error('[ERROR] Knowledge search failed:', error.message)
-    res.status(500).json({ error: 'Search failed', detail: error.message })
+    res.status(500).json({ error: 'Search failed' })
   }
 })
 
-// DELETE /api/knowledge/:id?userId=xxx — delete a knowledge document
-app.delete('/api/knowledge/:id', async (req, res) => {
+// DELETE /api/knowledge/:id — delete one of the current user's documents
+app.delete('/api/knowledge/:id', requireUser, knowledgeLimiter, async (req, res) => {
   const id = req.params.id
-  const userId = req.query.userId
 
   try {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Backend not configured' })
 
-    if (userId) {
-      // Ensure only the owner can delete
-      const { data: existing, error: lookupErr } = await supabaseAdmin
-        .from('knowledge_documents')
-        .select('id')
-        .eq('id', id)
-        .eq('user_id', userId)
-        .maybeSingle()
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from('knowledge_documents')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .maybeSingle()
 
-      if (lookupErr || !existing) {
-        return res.status(404).json({ error: 'Document not found or access denied' })
-      }
-    }
+    if (lookupError) throw lookupError
+    if (!existing) return res.status(404).json({ error: 'Document not found or access denied' })
 
     const { error } = await supabaseAdmin
       .from('knowledge_documents')
       .delete()
       .eq('id', id)
+      .eq('user_id', req.user.id)
 
     if (error) throw error
     res.json({ success: true })
   } catch (error) {
     console.error('[ERROR] Failed to delete knowledge doc:', error.message)
-    res.status(500).json({ error: 'Failed to delete', detail: error.message })
+    res.status(500).json({ error: 'Failed to delete' })
   }
 })
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[ai-proxy] listening on port ${PORT}`)
 })
+
+let shuttingDown = false
+const shutdown = (signal) => {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`[ai-proxy] ${signal} received, closing server`)
+
+  server.close(() => {
+    shutdownRedis().finally(() => process.exit(0))
+  })
+
+  setTimeout(() => process.exit(1), 10_000).unref()
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))

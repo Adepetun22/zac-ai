@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import { authFetch, backendPath } from './apiClient';
 
 // sessionStorage key that carries the reason a Supabase email link was
 // rejected. The callback URL is enough for a *valid* link — the router reads
@@ -61,7 +62,7 @@ class SupabaseService {
   getRedirectBase() {
     return (
       (typeof window !== 'undefined' && window.location?.origin) ||
-      (import.meta.env.VITE_BACKEND_URL || '').replace(/\/api$/, '').replace(/\/$/, '') ||
+      (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '').replace(/\/api$/, '') ||
       undefined
     );
   }
@@ -377,13 +378,12 @@ class SupabaseService {
 
   // Build the URL for the backend API.
   getBackendUrl(path) {
-    const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
-    return backendUrl ? `${backendUrl}${path}` : `/api${path}`
+    return backendPath(path)
   }
 
   // Create a model via the backend (api_key is encrypted server-side).
   async createAiModelBackend(model) {
-    const response = await fetch(this.getBackendUrl('/models'), {
+    const response = await authFetch('/models', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(model),
@@ -396,8 +396,8 @@ class SupabaseService {
   }
 
   // Fetch models via the backend (api_key is masked in the response).
-  async getAiModelsBackend(userId) {
-    const response = await fetch(this.getBackendUrl(`/models?userId=${encodeURIComponent(userId)}`))
+  async getAiModelsBackend(_userId) {
+    const response = await authFetch('/models')
     if (!response.ok) {
       const data = await response.json().catch(() => ({}))
       throw new Error(data.error || `HTTP ${response.status}`)
@@ -407,8 +407,8 @@ class SupabaseService {
   }
 
   // Fetch a single model via the backend (returns decrypted api_key for editing).
-  async getAiModelBackend(id, userId) {
-    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`))
+  async getAiModelBackend(id, _userId) {
+    const response = await authFetch(`/models/${encodeURIComponent(id)}`)
     if (!response.ok) {
       const data = await response.json().catch(() => ({}))
       throw new Error(data.error || `HTTP ${response.status}`)
@@ -419,7 +419,7 @@ class SupabaseService {
 
   // Update a model via the backend (api_key is encrypted server-side if provided).
   async updateAiModelBackend(id, updates) {
-    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}`), {
+    const response = await authFetch(`/models/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
@@ -433,7 +433,7 @@ class SupabaseService {
 
   // Delete a model via the backend.
   async deleteAiModelBackend(id) {
-    const response = await fetch(this.getBackendUrl(`/models/${encodeURIComponent(id)}`), {
+    const response = await authFetch(`/models/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     })
     if (!response.ok) {

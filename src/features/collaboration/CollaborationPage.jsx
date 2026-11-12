@@ -1,6 +1,6 @@
 ﻿import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Bot, Users, ChevronDown, ChevronRight, Copy, Check, Link, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet, BookOpen, Trash2, Search } from 'lucide-react'
+import { Send, X, GripVertical, BarChart2, LineChart, PieChart, Table2, Image as ImageIcon, Users, ChevronDown, ChevronRight, Copy, Check, UserPlus, Download, Calendar, Mail, MessageSquare, FileSpreadsheet, BookOpen, Trash2, Search } from 'lucide-react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import {
   BarChart, Bar, LineChart as ReLineChart, Line,
@@ -25,9 +25,9 @@ import AIService, { AIError, explainError } from '../../services/aiService'
 import { useAIStore } from '../../store/aiStore'
 import MarkdownMessage from '../../components/MarkdownMessage'
 import knowledgeService from '../../services/knowledgeService'
+import { authFetch, backendPath } from '../../services/apiClient'
 
-// Built-in free models — kept for image model detection only; model list comes from aiStore
-const IMAGE_MODEL_IDS = ['huggingface/free-image']
+// Built-in free models are owned by aiStore; model list comes from there.
 
 const PEER_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
@@ -176,7 +176,6 @@ function SpreadsheetWidget({ schema }) {
 function CalendarWidget({ schema }) {
   const { summary, start, end, location, description, ics } = schema
   const startDate = start ? new Date(start) : new Date()
-  const endDate = end ? new Date(end) : startDate
 
   const year = startDate.getFullYear()
   const month = startDate.getMonth()
@@ -377,9 +376,10 @@ function Widget({ widget, onMove, onRemove, canComment, commentCount, commentsOp
   const handleDownload = async () => {
     if (widget.schema.type !== 'image' || !widget.schema.imageUrl) return
     try {
-      const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
-      const proxyUrl = backendUrl ? `${backendUrl}/proxy-image?url=${encodeURIComponent(widget.schema.imageUrl)}` : widget.schema.imageUrl
-      const res = await fetch(proxyUrl)
+      const source = widget.schema.imageUrl
+      const res = source.startsWith('data:')
+        ? await fetch(source)
+        : await authFetch(`/proxy-image?url=${encodeURIComponent(source)}`)
       if (!res.ok) throw new Error('Download failed')
       const blob = await res.blob()
       const mimeToExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
@@ -493,8 +493,7 @@ function ChatPanel({ onAddWidget, mobileOpen, onMobileClose, sessionId }) {
   useEffect(() => {
     const checkBackendStatus = async () => {
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '') || ''
-        const response = await fetch(`${backendUrl}/health`);
+        const response = await fetch(backendPath('/health'));
         const data = await response.json();
         if (!response.ok) {
           setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Backend server is running but may not have API keys configured. Responses will be simulated.' }]);
@@ -801,8 +800,6 @@ function InviteDialog({ inviteCode, onClose, onJoin }) {
   const [joinCode, setJoinCode] = useState('')
   const [joining, setJoining] = useState(false)
 
-  const inviteUrl = inviteCode ? `zac://collab/join/${inviteCode}` : ''
-
   const copyToClipboard = () => {
     if (inviteCode) {
       navigator.clipboard.writeText(inviteCode)
@@ -981,19 +978,38 @@ export default function CollaborationPage() {
   const [inviteCode, setInviteCode] = useState('')
   const [sessionId, setSessionId] = useState(null)
   const [showExplainer, setShowExplainer] = useState(false)
-  const [isHost, setIsHost] = useState(false)
+  const [, setIsHost] = useState(false)
   // Comments are keyed by widget_id. One popover is open at a time.
   const [comments, setComments] = useState({})
   const [commentsOpenFor, setCommentsOpenFor] = useState(null)
   const [commentAnchor, setCommentAnchor] = useState(null)
   const { user } = useAuthStore();
   const { addNotification } = useNotification();
-  const { setSession, setDisconnectUser, clearSession } = useCollaborationStore();
+  const { setSession, setDisconnectUser, setPeerList } = useCollaborationStore();
   const currentUser = {
     id: user?.id || 'anonymous',
     name: user?.name || user?.email?.split('@')[0] || 'Anonymous',
     color: getPeerColor(user?.id || 'anonymous'),
   }
+
+  // Publish presence to the app shell so the header/sidebar can show the real
+  // peer count without opening a global Liveblocks room for every visitor.
+  useEffect(() => {
+    const normalized = Object.values(peers)
+      .filter((peer) => peer.id !== currentUser.id)
+      .map((peer) => ({
+        presence: {
+          userId: peer.id,
+          name: peer.name || 'Anonymous',
+          color: peer.color,
+        },
+        connectionId: peer.connectionId || peer.id,
+      }))
+
+    setPeerList(normalized)
+  }, [peers, currentUser.id, setPeerList])
+
+  useEffect(() => () => setPeerList([]), [setPeerList])
   const currentUserRef = useRef(currentUser)
   const cursorsRef = useRef({})
   const canvasRef = useRef(null)
@@ -1013,7 +1029,11 @@ export default function CollaborationPage() {
   // Sync the ref outside of render (mutating refs during render is an
   // anti-pattern that React 19 flags and can break concurrent mode).
   useEffect(() => {
-    currentUserRef.current = currentUser
+    currentUserRef.current = {
+      id: currentUser.id,
+      name: currentUser.name,
+      color: currentUser.color,
+    }
   }, [currentUser.id, currentUser.name, currentUser.color])
 
   // Load widgets from localStorage as fallback
@@ -1409,19 +1429,14 @@ export default function CollaborationPage() {
     send('widget:add', widget)
   }, [send, sessionId, saveLocalWidgets])
 
-  const moveWidget = useCallback(async (id, pos) => {
-    // 1. Optimistically update local state on every micro-movement for
-    //    buttery-smooth drag. No network calls in this hot path.
+  const moveWidget = useCallback((id, pos) => {
+    // 1. Optimistically update local state on every micro-movement for a
+    //    smooth drag. This hot path never touches localStorage or Supabase.
     const roundedPos = { x: Math.round(pos.x), y: Math.round(pos.y) }
-    setWidgets(prev => {
-      const next = prev.map(w => w.id === id ? { ...w, ...roundedPos } : w)
-      saveLocalWidgets(next)
-      return next
-    })
+    setWidgets(prev => prev.map(w => w.id === id ? { ...w, ...roundedPos } : w))
 
-    // 2. Throttle the Supabase write + WebSocket broadcast to ~50 ms.
-    //    Store the latest position and flush on the next animation frame
-    //    if enough time has elapsed.
+    // 2. Broadcast the latest position to peers, throttled to ~20 Hz. The
+    //    final position is persisted once, in endDrag().
     dragPendingRef.current = { id, pos: roundedPos }
 
     const now = Date.now()
@@ -1434,18 +1449,6 @@ export default function CollaborationPage() {
       if (pending) {
         dragPendingRef.current = null
         const { id: pendingId, pos: pendingPos } = pending
-
-        if (supabase) {
-          try {
-            supabase
-              .from('dashboard_widgets')
-              .update({ position_x: pendingPos.x, position_y: pendingPos.y })
-              .eq('id', pendingId)
-          } catch (error) {
-            console.warn('Could not update widget position in Supabase:', error.message)
-          }
-        }
-
         send('widget:move', { id: pendingId, ...pendingPos })
       }
     } else {
@@ -1459,23 +1462,11 @@ export default function CollaborationPage() {
           dragLastSentRef.current = Date.now()
 
           const { id: pendingId, pos: pendingPos } = pending
-
-          if (supabase) {
-            try {
-              supabase
-                .from('dashboard_widgets')
-                .update({ position_x: pendingPos.x, position_y: pendingPos.y })
-                .eq('id', pendingId)
-            } catch (error) {
-              console.warn('Could not update widget position in Supabase:', error.message)
-            }
-          }
-
           send('widget:move', { id: pendingId, ...pendingPos })
         })
       }
     }
-  }, [supabase, send, saveLocalWidgets])
+  }, [send])
 
   const removeWidget = useCallback(async (id) => {
     // Comments cascade at the database level; drop the local copy and close
@@ -1534,13 +1525,12 @@ export default function CollaborationPage() {
     draggingWidgetRef.current = widgetId
   }, [])
 
-  const endDrag = useCallback((widgetId) => {
+  const endDrag = useCallback((_widgetId) => {
     // Clear the "currently dragging" flag so the Supabase Realtime UPDATE
     // handler will once again accept remote updates for this widget.
     draggingWidgetRef.current = null
 
-    // Flush any pending drag update immediately (no more micro-movements
-    // coming, so send the final position right away).
+    // Flush the final position once, after the drag ends.
     const pending = dragPendingRef.current
     if (pending) {
       dragPendingRef.current = null
@@ -1548,14 +1538,13 @@ export default function CollaborationPage() {
       const { id: pendingId, pos: pendingPos } = pending
 
       if (supabase) {
-        try {
-          supabase
-            .from('dashboard_widgets')
-            .update({ position_x: pendingPos.x, position_y: pendingPos.y })
-            .eq('id', pendingId)
-        } catch (error) {
-          console.warn('Could not flush widget position in Supabase:', error.message)
-        }
+        supabase
+          .from('dashboard_widgets')
+          .update({ position_x: pendingPos.x, position_y: pendingPos.y })
+          .eq('id', pendingId)
+          .catch((error) => {
+            console.warn('Could not persist widget position:', error.message)
+          })
       }
 
       send('widget:move', { id: pendingId, ...pendingPos })
@@ -1566,7 +1555,13 @@ export default function CollaborationPage() {
       cancelAnimationFrame(dragFrameRef.current)
       dragFrameRef.current = null
     }
-  }, [supabase, send])
+
+    // Persist the final local layout once, not on every pointer move.
+    setWidgets(prev => {
+      saveLocalWidgets(prev)
+      return prev
+    })
+  }, [send, saveLocalWidgets])
 
   const addComment = useCallback(async (widgetId, { parentId, content }) => {
     if (!supabase || !sessionId || !user) return

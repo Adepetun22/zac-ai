@@ -16,9 +16,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            return 'vendor'
-          }
+          if (!id.includes('node_modules')) return undefined
+
+          if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts'
+          if (id.includes('framer-motion') || id.includes('gsap')) return 'vendor-motion'
+          if (id.includes('lucide-react')) return 'vendor-icons'
+          if (id.includes('react-router') || id.includes('scheduler') || id.includes('react')) return 'vendor-react'
+          if (id.includes('@supabase')) return 'vendor-supabase'
+          return 'vendor'
         },
       },
     },
